@@ -1,0 +1,13 @@
+# certbot only renews certificates within 30 days of expiry; twice a day is the
+# Let's Encrypt recommendation.
+[Unit]
+Description=Twice-daily Shopino certificate renewal check
+
+[Timer]
+OnCalendar=*-*-* 04,16:17:00
+RandomizedDelaySec=30m
+Persistent=true
+Unit=shopino-certbot-renew.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,17 @@
+# Shopino — Let's Encrypt renewal (webroot). nginx reloads the renewed
+# certificate by itself within CERT_RELOAD_INTERVAL (6 h).
+[Unit]
+Description=Shopino Let's Encrypt certificate renewal
+Wants=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/shopino/app
+# docker-compose.prod.yml reads env_file from ${SHOPINO_ENV_FILE}; without it compose
+# looks for ./.env.production, which does not exist in the checkout.
+Environment=SHOPINO_ENV_FILE=/opt/shopino/.env.production
+ExecStart=/usr/bin/docker compose -f docker-compose.prod.yml --env-file /opt/shopino/.env.production run --rm certbot renew --webroot -w /var/www/certbot --quiet
+ExecStartPost=/usr/bin/docker compose -f docker-compose.prod.yml --env-file /opt/shopino/.env.production exec -T nginx docker-entrypoint.sh reload
+PrivateTmp=true
+NoNewPrivileges=true

@@ -1,0 +1,13 @@
+# Daily at 03:30 server time (set the server timezone to Asia/Tehran, or adjust).
+# Persistent=true runs a missed backup at the next boot.
+[Unit]
+Description=Daily Shopino PostgreSQL backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=10m
+Persistent=true
+Unit=shopino-backup.service
+
+[Install]
+WantedBy=timers.target

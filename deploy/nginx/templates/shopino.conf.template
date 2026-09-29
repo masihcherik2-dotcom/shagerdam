@@ -1,0 +1,176 @@
+# =============================================================================
+# Shopino site — rendered by docker-entrypoint.sh (envsubst) at container start.
+# Variables: ${SHOPINO_DOMAIN} ${SHOPINO_SERVER_NAMES} ${SHOPINO_CSP}
+#            ${FRONTEND_UPSTREAM}
+#
+# Routing (matches the Phase-10 architecture):
+#   every public request → Next.js (storefront, panels, BFF /api/v1 + /api/session)
+#   The NestJS API is NOT published: it listens on the private compose network
+#   and is reached only by the BFF (server-to-server, Bearer tokens from the
+#   httpOnly session cookies). Swagger (/api/docs) is therefore not public.
+# =============================================================================
+
+upstream shopino_frontend {
+    server ${FRONTEND_UPSTREAM} max_fails=3 fail_timeout=10s;
+    keepalive 32;
+}
+
+map $host $shopino_csp {
+    default "${SHOPINO_CSP}";
+}
+
+# ── Port 80: ACME challenges, health probe, redirect everything else ────────
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+
+    # Let's Encrypt HTTP-01 (certbot --webroot writes here).
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type text/plain;
+        try_files $uri =404;
+    }
+
+    # Container health check (local only).
+    location = /nginx-health {
+        access_log off;
+        allow 127.0.0.1;
+        allow ::1;
+        deny all;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    location / {
+        return 301 https://${SHOPINO_DOMAIN}$request_uri;
+    }
+}
+
+# ── Port 443, unknown Host / SNI: refuse the TLS handshake ─────────────────
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+    ssl_reject_handshake on;
+}
+
+# ── Port 443, the shop ──────────────────────────────────────────────────────
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name ${SHOPINO_SERVER_NAMES};
+
+    # Certificate: Let's Encrypt when issued, otherwise a 7-day self-signed
+    # placeholder (the entrypoint switches automatically on the next reload).
+    ssl_certificate     /etc/nginx/certs/active/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/active/privkey.pem;
+
+    # Mozilla "intermediate" profile (TLS 1.2 + 1.3).
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:shopino_tls:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    # Connection cap per client address (DDoS / scraping guard).
+    limit_conn shopino_conn 60;
+
+    # Non-www canonical host.
+    if ($host != "${SHOPINO_DOMAIN}") {
+        return 301 https://${SHOPINO_DOMAIN}$request_uri;
+    }
+
+    include /etc/nginx/snippets/security-headers.conf;
+
+    # JSON body for rate-limited API calls (the web UI localises status 429).
+    error_page 429 = @rate_limited;
+    location @rate_limited {
+        include /etc/nginx/snippets/security-headers.conf;
+        default_type application/json;
+        return 429 '{"statusCode":429,"error":"Too Many Requests","message":"تعداد درخواست‌ها بیش از حد مجاز است؛ لطفاً کمی بعد دوباره تلاش کنید."}';
+    }
+
+    # Hidden files (except ACME, served on :80) are never proxied.
+    location ~ /\.(?!well-known/) {
+        deny all;
+    }
+
+    # Sign-in endpoints: strict per-IP budget on top of the API's own OTP
+    # limits. Exact/prefix matches (not regex): the `^~ /api/` prefix below
+    # would otherwise stop nginx from evaluating a regex location.
+    #   /api/session/{otp,verify,password}  — BFF sign-in routes
+    #   /api/v1/auth/                       — the generic BFF also forwards
+    #                                         auth/otp/request; the browser never
+    #                                         calls /api/v1/auth/* directly.
+    location = /api/session/otp {
+        limit_req zone=shopino_auth burst=10 nodelay;
+        include /etc/nginx/snippets/security-headers.conf;
+        include /etc/nginx/snippets/proxy-frontend.conf;
+    }
+    location = /api/session/verify {
+        limit_req zone=shopino_auth burst=10 nodelay;
+        include /etc/nginx/snippets/security-headers.conf;
+        include /etc/nginx/snippets/proxy-frontend.conf;
+    }
+    location = /api/session/password {
+        limit_req zone=shopino_auth burst=10 nodelay;
+        include /etc/nginx/snippets/security-headers.conf;
+        include /etc/nginx/snippets/proxy-frontend.conf;
+    }
+    location ^~ /api/v1/auth/ {
+        limit_req zone=shopino_auth burst=10 nodelay;
+        include /etc/nginx/snippets/security-headers.conf;
+        include /etc/nginx/snippets/proxy-frontend.conf;
+    }
+
+    # Uploads (product images, KYC and dispute evidence): 15 MB cap here only.
+    # The API still enforces MEDIA_MAX_IMAGE_BYTES / MEDIA_MAX_DOCUMENT_BYTES and
+    # checks file signatures.
+    location ^~ /api/v1/media/upload/ {
+        client_max_body_size 15m;
+        client_body_timeout 60s;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+        limit_req zone=shopino_upload burst=10 nodelay;
+        include /etc/nginx/snippets/security-headers.conf;
+        include /etc/nginx/snippets/proxy-frontend.conf;
+    }
+
+    # Product importer: the API fetches a remote page (≤ 10 s; for Digikala the
+    # API and then the product page) or copies up to 12 remote images (3 at a
+    # time, ≤ 10 s each, plus WebP processing), so answers can exceed the
+    # default 60 s read timeout. The API also enforces per-vendor quotas.
+    location ^~ /api/v1/vendor/products/import/ {
+        proxy_read_timeout 150s;
+        proxy_send_timeout 150s;
+        limit_req zone=shopino_api burst=10 nodelay;
+        include /etc/nginx/snippets/security-headers.conf;
+        include /etc/nginx/snippets/proxy-frontend.conf;
+    }
+
+    # Same-origin BFF (JSON API for the browser).
+    location ^~ /api/ {
+        limit_req zone=shopino_api burst=60 nodelay;
+        include /etc/nginx/snippets/security-headers.conf;
+        include /etc/nginx/snippets/proxy-frontend.conf;
+    }
+
+    # Content-hashed build assets: immutable, no rate limit, no access log.
+    location ^~ /_next/static/ {
+        access_log off;
+        include /etc/nginx/snippets/security-headers.conf;
+        include /etc/nginx/snippets/proxy-frontend.conf;
+        proxy_hide_header Cache-Control;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+    }
+
+    # Pages (SSR/streaming).
+    location / {
+        limit_req zone=shopino_web burst=80 nodelay;
+        include /etc/nginx/snippets/security-headers.conf;
+        include /etc/nginx/snippets/proxy-frontend.conf;
+    }
+}
