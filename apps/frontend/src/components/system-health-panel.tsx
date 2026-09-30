@@ -1,160 +1,90 @@
 'use client';
 
+import { CheckCircle2, CircleAlert, CircleX, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
-import { ApiError } from '@/lib/api/errors';
-import { getSystemHealth, type HealthIndicatorDetail, type SystemHealth } from '@/lib/api/health';
+import { Button } from '@/components/ui/button';
+import { StatusBadge } from '@/components/ui/misc';
+import { getPublicStatus, isPublicStatusReport } from '@/lib/api/health';
+import type { ComponentState, PublicStatusReport } from '@/lib/api/types';
+import { formatDateTime } from '@/lib/format';
+import { COMPONENT_STATE, STATUS_MODULE_LABELS } from '@/lib/labels';
 
-/** Auto-refresh cadence of the panel. */
-const REFRESH_INTERVAL_MS = 15_000;
+/** Auto-refresh cadence (the backend caches the report for 10 s). */
+const REFRESH_INTERVAL_MS = 30_000;
 
-const CHECK_LABELS: Record<string, string> = {
-  database: 'پایگاه داده (PostgreSQL)',
-  redis: 'ردیس (Redis)',
-  memory: 'حافظهٔ پردازش',
-  uptime: 'زمان فعالیت سرویس',
+const OVERALL: Record<ComponentState, { title: string; className: string; icon: typeof CheckCircle2 }> = {
+  operational: { title: 'همهٔ سرویس‌ها فعال هستند', className: 'border-emerald-200 bg-emerald-50 text-emerald-900', icon: CheckCircle2 },
+  degraded: { title: 'بخشی از سرویس‌ها با کندی یا اختلال همراه است', className: 'border-amber-200 bg-amber-50 text-amber-900', icon: CircleAlert },
+  outage: { title: 'بخشی از سرویس‌ها در دسترس نیست', className: 'border-red-200 bg-red-50 text-red-900', icon: CircleX },
 };
 
 interface SystemHealthPanelProps {
-  initialHealth: SystemHealth | null;
+  initialReport: PublicStatusReport | null;
   initialError: string | null;
 }
 
-function isSystemHealth(value: unknown): value is SystemHealth {
-  if (typeof value !== 'object' || value === null) {
-    return false;
-  }
-  const candidate = value as Partial<SystemHealth>;
-  return typeof candidate.status === 'string' && typeof candidate.details === 'object';
-}
-
-function formatDetailValue(key: string, detail: HealthIndicatorDetail): string {
-  if (detail.latency_ms !== undefined) {
-    return `زمان پاسخ: ${detail.latency_ms.toLocaleString('fa-IR')} میلی‌ثانیه`;
-  }
-  if (key === 'uptime' && detail.uptime_seconds !== undefined) {
-    const minutes = Math.floor(detail.uptime_seconds / 60);
-    const seconds = detail.uptime_seconds % 60;
-    return `فعال از ${minutes.toLocaleString('fa-IR')} دقیقه و ${seconds.toLocaleString('fa-IR')} ثانیه پیش`;
-  }
-  if (detail.message !== undefined) {
-    return detail.message;
-  }
-  return '';
-}
-
 /**
- * Live status of the API and its dependencies. The first render uses the report
- * fetched on the server; afterwards the browser polls the backend through the
- * same-origin `/api/v1` proxy and can be refreshed manually.
+ * Public status of the platform's business capabilities. Shows no internal
+ * component names, error messages, memory, uptime or addresses — only
+ * operational / degraded / outage per capability.
  */
-export function SystemHealthPanel({ initialHealth, initialError }: SystemHealthPanelProps) {
-  const [health, setHealth] = useState<SystemHealth | null>(initialHealth);
+export function SystemHealthPanel({ initialReport, initialError }: SystemHealthPanelProps) {
+  const [report, setReport] = useState<PublicStatusReport | null>(initialReport);
   const [error, setError] = useState<string | null>(initialError);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
 
   const refresh = useCallback(async (): Promise<void> => {
     setIsRefreshing(true);
     try {
-      const report = await getSystemHealth();
-      setHealth(report);
+      const next = await getPublicStatus();
+      if (!isPublicStatusReport(next)) throw new Error('invalid report');
+      setReport(next);
       setError(null);
-    } catch (caught) {
-      const apiError =
-        caught instanceof ApiError ? caught : new ApiError(String(caught), { kind: 'unknown' });
-
-      // A 503 from the health endpoint is still a full report: the API is up
-      // but a dependency is down. Render that report instead of a bare error.
-      if (apiError.status === 503 && isSystemHealth(apiError.details)) {
-        setHealth(apiError.details);
-        setError(null);
-      } else {
-        setError(apiError.message);
-        setHealth(null);
-      }
+    } catch {
+      setError('ارتباط با سامانه برقرار نشد؛ ممکن است سرویس موقتاً در دسترس نباشد.');
     } finally {
-      setLastUpdatedAt(new Date().toLocaleTimeString('fa-IR'));
       setIsRefreshing(false);
     }
   }, []);
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      void refresh();
-    }, REFRESH_INTERVAL_MS);
+    const timer = setInterval(() => void refresh(), REFRESH_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [refresh]);
 
-  const isHealthy = health?.status === 'ok';
-  const checks = Object.entries(health?.details ?? {});
+  const overall = report && !error ? OVERALL[report.status] : OVERALL.outage;
+  const OverallIcon = overall.icon;
 
   return (
-    <section className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-surface p-6 shadow-sm">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <span
-            className={`inline-flex h-3 w-3 rounded-full ${
-              isHealthy ? 'bg-emerald-500' : error !== null ? 'bg-rose-500' : 'bg-amber-500'
-            }`}
-            aria-hidden="true"
-          />
-          <div className="flex flex-col">
-            <span className="font-semibold text-slate-900">
-              {error !== null ? 'عدم دسترسی به API' : isHealthy ? 'سامانه سالم است' : 'سامانه در وضعیت ناسالم'}
-            </span>
-            <span className="text-xs text-slate-500">
-              {lastUpdatedAt === null ? 'در حال دریافت وضعیت…' : `آخرین بروزرسانی: ${lastUpdatedAt}`}
-            </span>
-          </div>
+    <section className="flex flex-col gap-4" aria-live="polite">
+      <div className={`flex items-center gap-3 rounded-2xl border p-5 ${overall.className}`} data-testid="status-overall">
+        <OverallIcon className="size-7 shrink-0" aria-hidden="true" />
+        <div className="flex flex-col">
+          <p className="font-bold">{error ? 'ارتباط با سامانه برقرار نیست' : overall.title}</p>
+          {report ? <p className="text-xs opacity-80">آخرین بررسی: {formatDateTime(report.checkedAt)}</p> : null}
         </div>
-
-        <button
-          type="button"
-          onClick={() => {
-            void refresh();
-          }}
-          disabled={isRefreshing}
-          className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {isRefreshing ? 'در حال بررسی…' : 'بررسی مجدد'}
-        </button>
       </div>
 
-      {error !== null ? (
-        <p className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          {error}
-        </p>
-      ) : null}
+      {error ? <p className="text-sm text-slate-600">{error}</p> : null}
 
-      {checks.length > 0 ? (
-        <ul className="grid gap-3 sm:grid-cols-2">
-          {checks.map(([key, detail]) => (
-            <li
-              key={key}
-              className="flex flex-col gap-1 rounded-xl border border-slate-200 bg-surface-muted px-4 py-3"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-medium text-slate-800">
-                  {CHECK_LABELS[key] ?? key}
-                </span>
-                <span
-                  className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                    detail.status === 'up'
-                      ? 'bg-emerald-100 text-emerald-700'
-                      : 'bg-rose-100 text-rose-700'
-                  }`}
-                >
-                  {detail.status === 'up' ? 'سالم' : 'ناسالم'}
-                </span>
-              </div>
-              <span className="text-xs leading-5 text-slate-500">
-                {formatDetailValue(key, detail)}
+      {report ? (
+        <ul className="divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white" data-testid="status-modules">
+          {report.modules.map((module) => (
+            <li key={module.key} className="flex items-center justify-between gap-4 p-4">
+              <span className="flex flex-col">
+                <span className="font-medium text-slate-900">{STATUS_MODULE_LABELS[module.key].title}</span>
+                <span className="text-xs text-slate-500">{STATUS_MODULE_LABELS[module.key].description}</span>
               </span>
+              <StatusBadge value={module.status} map={COMPONENT_STATE} />
             </li>
           ))}
         </ul>
       ) : null}
+
+      <Button variant="secondary" className="self-start" loading={isRefreshing} icon={<RefreshCw className="size-4" />} onClick={() => void refresh()}>
+        بررسی دوباره
+      </Button>
     </section>
   );
 }

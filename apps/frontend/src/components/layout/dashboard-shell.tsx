@@ -1,6 +1,6 @@
 'use client';
 
-import { Banknote, BarChart3, CreditCard, Gavel, LayoutDashboard, MapPin, Package, PackageCheck, Palette, Scale, ShieldCheck, ShoppingBag, Store, User, Wallet, type LucideIcon } from 'lucide-react';
+import { Banknote, BarChart3, Building2, CreditCard, Gavel, Inbox, LayoutDashboard, MapPin, Package, PackageCheck, Palette, Scale, ShieldCheck, ShoppingBag, Store, User, Wallet, type LucideIcon } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
@@ -48,7 +48,9 @@ const NAV: Record<DashboardArea, { title: string; items: NavItem[] }> = {
       { href: '/admin/financial', label: 'گزارش مالی', icon: BarChart3 },
       { href: '/admin/settlements', label: 'تسویه‌ها', icon: Banknote },
       { href: '/admin/disputes', label: 'داوری اختلاف‌ها', icon: Gavel },
+      { href: '/admin/support', label: 'پیام‌های تماس', icon: Inbox },
       { href: '/admin/branding', label: 'هویت بصری و بنرها', icon: Palette },
+      { href: '/admin/site-info', label: 'اطلاعات سایت و نمادها', icon: Building2 },
     ],
   },
 };

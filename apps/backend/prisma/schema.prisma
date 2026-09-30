@@ -90,24 +90,26 @@ model User {
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  customerProfile       CustomerProfile?
-  addresses             Address[]
-  vendor                Vendor?
-  auditLogs             AuditLog[]
-  carts                 Cart[]
-  parentOrders          ParentOrder[]
-  creditAccounts        CreditAccount[]
-  creditApplications    CreditApplication[]
-  disputesRaised        Dispute[]
-  disputeEvidence       DisputeEvidence[]
-  disputesResponded     Dispute[]               @relation("DisputeVendorResponder")
-  disputesResolved      Dispute[]               @relation("DisputeResolver")
-  disputeEvents         DisputeEvent[]
-  verificationsReview   VendorVerification[]    @relation("VerificationReviewer")
-  mediaAssets           MediaAsset[]            @relation("MediaAssetOwner")
-  settlementsProcessed  SettlementRequest[]     @relation("SettlementProcessor")
-  subOrderStatusChanges SubOrderStatusHistory[] @relation("SubOrderStatusActor")
-  productsBlocked       Product[]               @relation("ProductBlockedBy")
+  customerProfile        CustomerProfile?
+  addresses              Address[]
+  vendor                 Vendor?
+  auditLogs              AuditLog[]
+  carts                  Cart[]
+  parentOrders           ParentOrder[]
+  creditAccounts         CreditAccount[]
+  creditApplications     CreditApplication[]
+  disputesRaised         Dispute[]
+  disputeEvidence        DisputeEvidence[]
+  disputesResponded      Dispute[]               @relation("DisputeVendorResponder")
+  disputesResolved       Dispute[]               @relation("DisputeResolver")
+  disputeEvents          DisputeEvent[]
+  verificationsReview    VendorVerification[]    @relation("VerificationReviewer")
+  mediaAssets            MediaAsset[]            @relation("MediaAssetOwner")
+  settlementsProcessed   SettlementRequest[]     @relation("SettlementProcessor")
+  subOrderStatusChanges  SubOrderStatusHistory[] @relation("SubOrderStatusActor")
+  productsBlocked        Product[]               @relation("ProductBlockedBy")
+  contactMessagesSent    ContactMessage[]        @relation("ContactMessageSender")
+  contactMessagesHandled ContactMessage[]        @relation("ContactMessageHandler")
 
   @@index([role, isActive])
   @@index([createdAt])
@@ -1157,4 +1159,52 @@ model SystemConfig {
   updatedAt   DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@map("system_configs")
+}
+
+// ─── Support: contact form (Phase 0 trust layer) ─────────────────────────────
+
+enum ContactMessageTopic {
+  ORDER
+  PAYMENT
+  BNPL
+  RETURN
+  VENDOR
+  TECHNICAL
+  OTHER
+}
+
+enum ContactMessageStatus {
+  NEW
+  IN_PROGRESS
+  RESOLVED
+}
+
+/// Message sent through the public contact form (`/contact`). Anyone may send
+/// one (rate-limited per IP and per mobile); a signed-in sender is linked via
+/// `userId`. Support staff work the queue in `/admin/support`.
+model ContactMessage {
+  id              String               @id @default(uuid()) @db.Uuid
+  fullName        String               @map("full_name") @db.VarChar(120)
+  mobile          String               @db.VarChar(15)
+  email           String?              @db.VarChar(254)
+  topic           ContactMessageTopic
+  subject         String               @db.VarChar(150)
+  message         String               @db.Text
+  status          ContactMessageStatus @default(NEW)
+  userId          String?              @map("user_id") @db.Uuid
+  ipAddress       String?              @map("ip_address") @db.VarChar(45)
+  userAgent       String?              @map("user_agent") @db.VarChar(255)
+  staffNote       String?              @map("staff_note") @db.Text
+  handledByUserId String?              @map("handled_by_user_id") @db.Uuid
+  handledAt       DateTime?            @map("handled_at") @db.Timestamptz(3)
+  createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user      User? @relation("ContactMessageSender", fields: [userId], references: [id], onDelete: SetNull)
+  handledBy User? @relation("ContactMessageHandler", fields: [handledByUserId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([mobile, createdAt])
+  @@index([userId])
+  @@map("contact_messages")
 }

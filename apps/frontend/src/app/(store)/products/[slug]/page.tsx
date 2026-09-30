@@ -3,6 +3,7 @@ import type { Metadata } from 'next';
 import Image from 'next/image';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { cache } from 'react';
 
 import { ProductGallery } from '@/components/catalog/product-gallery';
 import { ProductSpecifications } from '@/components/catalog/product-specifications';
@@ -12,31 +13,51 @@ import { loadCreditPlans } from '@/lib/api/catalog.server';
 import { PLATFORM_NAME } from '@/lib/brand';
 import { serverApiOrNull } from '@/lib/api/server';
 import type { ProductDetail } from '@/lib/api/types';
+import { resolveSiteOrigin } from '@/lib/env';
 import { formatDate } from '@/lib/format';
+import { absoluteUrl, productBreadcrumbJsonLd, productJsonLd, productMetaDescription, serializeJsonLd } from '@/lib/seo';
 
 export const dynamic = 'force-dynamic';
 
 type Props = { params: Promise<{ slug: string }>; searchParams: Promise<{ variant?: string | string[] }> };
 
+/** One backend call per request, shared by generateMetadata and the page. */
+const loadProduct = cache((slug: string) => serverApiOrNull<ProductDetail>(`products/${encodeURIComponent(slug)}`));
+
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
-  const product = await serverApiOrNull<ProductDetail>(`products/${encodeURIComponent(slug)}`).catch(() => null);
-  return product ? { title: product.title, description: product.description?.slice(0, 160) ?? undefined } : { title: 'محصول' };
+  const product = await loadProduct(slug).catch(() => null);
+  if (!product) return { title: 'محصول یافت نشد', robots: { index: false } };
+  const path = `/products/${encodeURIComponent(product.slug)}`;
+  const description = productMetaDescription(product);
+  const origin = resolveSiteOrigin();
+  const images = product.media.slice(0, 1).map((image) => ({ url: absoluteUrl(origin, image.url), alt: product.title }));
+  return {
+    title: product.title,
+    description,
+    alternates: { canonical: path },
+    openGraph: { type: 'website', url: path, title: product.title, description, ...(images.length > 0 ? { images } : {}) },
+    twitter: { card: images.length > 0 ? 'summary_large_image' : 'summary', title: product.title, description, ...(images.length > 0 ? { images: images.map((image) => image.url) } : {}) },
+  };
 }
 
 export default async function ProductPage({ params, searchParams }: Props) {
   const { slug } = await params;
   const { variant } = await searchParams;
   const initialSku = typeof variant === 'string' ? variant : null;
-  const [product, plans] = await Promise.all([serverApiOrNull<ProductDetail>(`products/${encodeURIComponent(slug)}`), loadCreditPlans()]);
+  const [product, plans] = await Promise.all([loadProduct(slug), loadCreditPlans()]);
   if (!product) {
     notFound();
   }
   const vendor = product.vendor;
+  const origin = resolveSiteOrigin();
+  const jsonLd = serializeJsonLd([productJsonLd(product, origin), productBreadcrumbJsonLd(product, origin, PLATFORM_NAME)]);
   const instagram = vendor.instagramHandle?.replace(/^@/, '');
 
   return (
     <div className="flex flex-col gap-8">
+      {/* Schema.org Product + BreadcrumbList; serializeJsonLd escapes `<` so the payload cannot close the script tag. */}
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd }} />
       <nav aria-label="مسیر" className="flex flex-wrap items-center gap-1 text-xs text-slate-500">
         <Link href="/" className="hover:text-brand-700">
           {PLATFORM_NAME}

@@ -34,7 +34,13 @@ export const dynamic = 'force-dynamic';
  * tokens in reach of browser JavaScript. Sign-in/out goes through /api/session.
  */
 
-const BLOCKED_PATHS = new Set(['auth/otp/verify', 'auth/login/password', 'auth/refresh', 'auth/logout']);
+const BLOCKED_PATHS = new Set(['auth/otp/verify', 'auth/login/password', 'auth/refresh', 'auth/logout', 'health']);
+
+/**
+ * `health` (exact) is the operator readiness probe with dependency details; it
+ * stays reachable inside the Docker network only. Visitors use `health/status`.
+ */
+const BLOCKED_MESSAGES: Record<string, string> = { health: 'Not available publicly. See /api/v1/health/status.' };
 
 /**
  * Called by the bank, possibly as a cross-site form POST. Public at the
@@ -79,8 +85,11 @@ async function handle(request: NextRequest, context: RouteContext): Promise<Resp
   const { path: segments } = await context.params;
   const path = segments.map((segment) => encodeURIComponent(segment)).join('/');
 
-  if (BLOCKED_PATHS.has(path)) {
-    return jsonResponse(404, { statusCode: 404, error: 'Not Found', message: 'Use /api/session for sign-in, refresh and sign-out.' });
+  // Compared case-insensitively and without trailing slashes so `HEALTH` or
+  // `health/` cannot slip past to a router that treats them as the same route.
+  const blockKey = path.toLowerCase().replace(/\/+$/, '');
+  if (BLOCKED_PATHS.has(blockKey)) {
+    return jsonResponse(404, { statusCode: 404, error: 'Not Found', message: BLOCKED_MESSAGES[blockKey] ?? 'Use /api/session for sign-in, refresh and sign-out.' });
   }
   const mutating = request.method !== 'GET' && request.method !== 'HEAD';
   if (mutating && !CROSS_SITE_ALLOWED.has(path) && !isSameOrigin(request)) {

@@ -1171,3 +1171,78 @@ export interface TorobFeedPage {
   totalPages: number;
   products: TorobFeedItem[];
 }
+
+/* ─── Trust layer: business identity, public status, contact form ───────── */
+
+export interface SiteInfo {
+  legalName: string | null;
+  nationalId: string | null;
+  registrationNumber: string | null;
+  supportPhone: string | null;
+  supportEmail: string | null;
+  officeAddress: string | null;
+  postalCode: string | null;
+  workingHours: string | null;
+  enamadLinkUrl: string | null;
+  enamadImageUrl: string | null;
+  samandehiLinkUrl: string | null;
+  samandehiImageUrl: string | null;
+}
+
+export type SiteInfoField = keyof SiteInfo;
+
+export interface AdminSiteInfo extends SiteInfo {
+  updatedAt: Record<SiteInfoField, string | null>;
+  history: Array<{ id: string; createdAt: string; actor: { id: string; fullName: string } | null; changedFields: string[] }>;
+  auditLogId?: string;
+}
+
+export type ComponentState = 'operational' | 'degraded' | 'outage';
+export type PublicStatusModule = 'storefront' | 'orders' | 'payments' | 'bnpl' | 'auth';
+
+export interface PublicStatusReport {
+  status: ComponentState;
+  checkedAt: string;
+  modules: Array<{ key: PublicStatusModule; status: ComponentState }>;
+}
+
+export type ContactMessageTopic = 'ORDER' | 'PAYMENT' | 'BNPL' | 'RETURN' | 'VENDOR' | 'TECHNICAL' | 'OTHER';
+export type ContactMessageStatus = 'NEW' | 'IN_PROGRESS' | 'RESOLVED';
+
+export interface ContactMessageInput {
+  fullName: string;
+  mobile: string;
+  email?: string;
+  topic: ContactMessageTopic;
+  subject: string;
+  message: string;
+  website?: string;
+}
+
+export interface ContactMessageReceipt {
+  id: string;
+  reference: string;
+  createdAt: string;
+}
+
+export interface AdminContactMessage {
+  id: string;
+  reference: string;
+  fullName: string;
+  mobile: string;
+  email: string | null;
+  topic: ContactMessageTopic;
+  subject: string;
+  message: string;
+  status: ContactMessageStatus;
+  staffNote: string | null;
+  sender: { id: string; fullName: string } | null;
+  handledBy: { id: string; fullName: string } | null;
+  handledAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminContactMessagePage extends Page<AdminContactMessage> {
+  counts: Record<ContactMessageStatus, number>;
+}

@@ -1,4 +1,5 @@
 import { formatToman } from '@/lib/currency';
+import { SITE_INFO_FIELD_LABELS } from '@/lib/site-info';
 
 /**
  * Persian texts for the backend's stable error codes. The backend keeps some
@@ -22,6 +23,11 @@ const CODE_MESSAGES: Record<string, string | ((details: Record<string, unknown>)
   BRANDING_SVG_REJECTED: 'این فایل SVG پذیرفته نشد (بیش از ۵۱۲ کیلوبایت، یا دارای entity یا ارجاع به منابع بیرونی).',
   CART_EMPTY: 'سبد خرید خالی است.',
   CART_FULL: 'سبد خرید به حداکثر ظرفیت رسیده است.',
+  CONTACT_INVALID_FIELD: 'متن واردشده کوتاه یا نامعتبر است؛ فیلدها را کامل‌تر بنویسید.',
+  CONTACT_INVALID_MOBILE: 'شمارهٔ موبایل معتبر نیست.',
+  CONTACT_MESSAGE_NOT_FOUND: 'این پیام پیدا نشد.',
+  CONTACT_NOTHING_TO_UPDATE: 'تغییری برای ثبت وجود ندارد.',
+  CONTACT_REJECTED: 'پیام پذیرفته نشد؛ صفحه را تازه کنید و دوباره تلاش کنید.',
   CONCURRENT_UPDATE: 'اطلاعات هم‌زمان تغییر کرد؛ صفحه را تازه کنید و دوباره تلاش کنید.',
   CREDIT_ORDER_REFUND_UNSUPPORTED: 'بازپرداخت یا لغو مرسوله‌های سفارش اعتباری/ترکیبی به‌صورت خودکار پشتیبانی نمی‌شود؛ باید با بانک اعتباردهنده به‌صورت دستی پیگیری شود.',
   CREDIT_ACCOUNT_EXISTS: 'شما از قبل حساب اعتباری فعال دارید.',
@@ -73,6 +79,7 @@ const CODE_MESSAGES: Record<string, string | ((details: Record<string, unknown>)
   PAYA_REFERENCE_IN_USE: 'این شمارهٔ پیگیری پایا قبلاً ثبت شده است.',
   PRICE_CHANGED: 'قیمت کالا تغییر کرده است.',
   SETTLEMENT_ALREADY_PROCESSED: 'این درخواست تسویه قبلاً رسیدگی شده است.',
+  SITE_INFO_INVALID_FIELD: (details) => (typeof details.field === 'string' ? `مقدار «${SITE_INFO_FIELD_LABELS[details.field] ?? details.field}» معتبر نیست.` : 'یکی از مقادیر معتبر نیست.'),
   SUB_ORDER_NOT_DISPUTABLE: 'برای این مرسوله در وضعیت فعلی نمی‌توان اختلاف ثبت کرد.',
   SUB_ORDER_UNDER_DISPUTE: 'این مرسوله اختلاف فعال دارد و تا پایان رسیدگی قابل تغییر نیست.',
 };

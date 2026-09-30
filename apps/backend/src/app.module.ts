@@ -21,6 +21,8 @@ import { ProductsModule } from './modules/products/products.module';
 import { ImporterModule } from './modules/importer/importer.module';
 import { TorobIntegrationModule } from './modules/integrations/torob/torob.module';
 import { BrandingModule } from './modules/branding/branding.module';
+import { SiteInfoModule } from './modules/site-info/site-info.module';
+import { SupportModule } from './modules/support/support.module';
 import { ShippingModule } from './modules/shipping/shipping.module';
 import { AddressesModule } from './modules/addresses/addresses.module';
 import { CartModule } from './modules/cart/cart.module';
@@ -61,6 +63,8 @@ import { WalletModule } from './modules/wallet/wallet.module';
     ImporterModule,
     TorobIntegrationModule,
     BrandingModule,
+    SiteInfoModule,
+    SupportModule,
     ShippingModule,
     AddressesModule,
     CartModule,

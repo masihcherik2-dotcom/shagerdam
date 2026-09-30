@@ -1,4 +1,8 @@
 import type {
+  ContactMessageStatus,
+  ContactMessageTopic,
+  ComponentState,
+  PublicStatusModule,
   CreditAccountStatus,
   CreditApplicationStatus,
   DisputeEventType,
@@ -169,3 +173,34 @@ export const TIMELINE_EVENT_LABELS: Record<string, string> = {
 
 /** Forward progress of a package, for the order timeline stepper. */
 export const PACKAGE_STEPS: readonly SubOrderStatus[] = ['PENDING_APPROVAL', 'PROCESSING', 'SHIPPED', 'DELIVERED'];
+
+export const CONTACT_TOPIC_LABELS: Record<ContactMessageTopic, string> = {
+  ORDER: 'پیگیری سفارش',
+  PAYMENT: 'پرداخت و بازگشت وجه',
+  BNPL: 'خرید اقساطی و اعتبار',
+  RETURN: 'مرجوعی و ضمانت',
+  VENDOR: 'همکاری و فروشندگی',
+  TECHNICAL: 'مشکل فنی سایت',
+  OTHER: 'سایر موارد',
+};
+
+export const CONTACT_STATUS: Record<ContactMessageStatus, { label: string; tone: Tone }> = {
+  NEW: { label: 'جدید', tone: 'warning' },
+  IN_PROGRESS: { label: 'در حال پیگیری', tone: 'info' },
+  RESOLVED: { label: 'پاسخ داده شد', tone: 'success' },
+};
+
+/** Business capabilities on the public status page (no internal component names). */
+export const STATUS_MODULE_LABELS: Record<PublicStatusModule, { title: string; description: string }> = {
+  storefront: { title: 'فروشگاه و کاتالوگ', description: 'مرور دسته‌ها، جست‌وجو و صفحهٔ محصولات' },
+  orders: { title: 'ثبت و پیگیری سفارش', description: 'سبد خرید، ثبت سفارش و وضعیت مرسوله‌ها' },
+  payments: { title: 'پرداخت آنلاین', description: 'اتصال به درگاه بانکی و ثبت نتیجهٔ پرداخت' },
+  bnpl: { title: 'خرید اقساطی', description: 'اعتبار، طرح‌های اقساطی و پرداخت اقساط' },
+  auth: { title: 'ورود و حساب کاربری', description: 'ارسال کد ورود و نشست کاربران' },
+};
+
+export const COMPONENT_STATE: Record<ComponentState, { label: string; tone: Tone }> = {
+  operational: { label: 'فعال', tone: 'success' },
+  degraded: { label: 'کندی یا اختلال جزئی', tone: 'warning' },
+  outage: { label: 'قطع', tone: 'danger' },
+};

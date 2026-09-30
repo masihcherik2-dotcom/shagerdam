@@ -27,6 +27,8 @@ const RULES: readonly RouteRule[] = [
   { prefix: '/admin/settlements', roles: FINANCE },
   { prefix: '/admin/disputes', roles: DISPUTE_STAFF },
   { prefix: '/admin/branding', roles: PLATFORM_ADMIN },
+  { prefix: '/admin/site-info', roles: PLATFORM_ADMIN },
+  { prefix: '/admin/support', roles: ADMIN_READ },
   { prefix: '/admin', roles: ALL_STAFF },
   { prefix: '/customer', roles: ['CUSTOMER'] },
   { prefix: '/checkout', roles: ['CUSTOMER'] },

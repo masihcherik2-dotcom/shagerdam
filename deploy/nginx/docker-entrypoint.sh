@@ -77,9 +77,11 @@ for value in "$SHOPINO_EXTRA_DOMAINS" "$CSP_EXTRA_IMG_SRC" "$CSP_FORM_ACTION_EXT
 done
 
 SHOPINO_SERVER_NAMES="$SHOPINO_DOMAIN $SHOPINO_EXTRA_DOMAINS"
+# trustseal.enamad.ir / logo.samandehi.ir: the footer trust-seal images
+# (they must load from the issuer; see /admin/site-info).
 # The single quotes are literal CSP syntax ('self', 'none'), not shell quoting.
 # shellcheck disable=SC2089,SC2090
-SHOPINO_CSP="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: ${CSP_EXTRA_IMG_SRC}; font-src 'self' data:; connect-src 'self'; media-src 'self'; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' ${CSP_FORM_ACTION_EXTRA}; upgrade-insecure-requests"
+SHOPINO_CSP="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://trustseal.enamad.ir https://logo.samandehi.ir ${CSP_EXTRA_IMG_SRC}; font-src 'self' data:; connect-src 'self'; media-src 'self'; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' ${CSP_FORM_ACTION_EXTRA}; upgrade-insecure-requests"
 # shellcheck disable=SC2090
 export SHOPINO_DOMAIN SHOPINO_SERVER_NAMES SHOPINO_CSP FRONTEND_UPSTREAM
 

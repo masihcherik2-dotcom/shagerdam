@@ -6,6 +6,7 @@ import { SessionProvider } from '@/components/providers/session-provider';
 import { ToastProvider } from '@/components/providers/toast-provider';
 import { loadBranding } from '@/lib/api/branding.server';
 import { getServerSession } from '@/lib/api/server';
+import { resolveSiteOrigin } from '@/lib/env';
 
 import { vazirmatn } from './fonts';
 import './globals.css';
@@ -16,10 +17,28 @@ export async function generateMetadata(): Promise<Metadata> {
   // browser default applies (no broken icon link is emitted).
   const branding = await loadBranding();
   const appleIcon = branding.mobileLogoUrl ?? branding.faviconUrl;
+  const description = `${PLATFORM_NAME}، ${PLATFORM_TAGLINE} — خرید نقدی یا اقساطی (BNPL) از فروشگاه‌های تأییدشده.`;
   return {
+    // Absolute base for canonical/OG URLs; the og:image / twitter:image files
+    // (app/opengraph-image.png, app/twitter-image.png) are emitted by Next.
+    metadataBase: new URL(resolveSiteOrigin()),
     title: { default: PLATFORM_TITLE, template: `%s | ${PLATFORM_NAME}` },
     applicationName: PLATFORM_NAME,
-    description: `${PLATFORM_NAME}، ${PLATFORM_TAGLINE} — خرید نقدی یا اقساطی (BNPL) از فروشگاه‌های تأییدشده.`,
+    description,
+    openGraph: {
+      type: 'website',
+      locale: 'fa_IR',
+      siteName: PLATFORM_NAME,
+      title: PLATFORM_TITLE,
+      description,
+      url: '/',
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: PLATFORM_TITLE,
+      description,
+    },
+    formatDetection: { telephone: false },
     ...(branding.faviconUrl || appleIcon
       ? {
           icons: {

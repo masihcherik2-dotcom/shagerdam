@@ -35,3 +35,26 @@ export function resolveBackendInternalUrl(): string {
 function stripTrailingSlashes(value: string): string {
   return value.replace(/\/+$/, '');
 }
+
+const DEV_SITE_ORIGIN = 'http://localhost:3000';
+
+/**
+ * Public origin of the storefront (canonical URLs, sitemap, Open Graph):
+ * `PUBLIC_WEB_ORIGIN` when set, otherwise `https://<SHOPINO_DOMAIN>` (both
+ * passed to the frontend container by docker-compose.prod.yml). Development
+ * falls back to localhost; production never guesses.
+ */
+export function resolveSiteOrigin(): string {
+  const explicit = process.env.PUBLIC_WEB_ORIGIN?.trim();
+  if (explicit) {
+    return stripTrailingSlashes(explicit);
+  }
+  const domain = process.env.SHOPINO_DOMAIN?.trim();
+  if (domain) {
+    return `https://${domain.replace(/^https?:\/\//, '').replace(/\/+$/, '')}`;
+  }
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('PUBLIC_WEB_ORIGIN or SHOPINO_DOMAIN must be set for production deployments.');
+  }
+  return DEV_SITE_ORIGIN;
+}

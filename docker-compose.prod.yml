@@ -162,6 +162,10 @@ services:
       HOSTNAME: 0.0.0.0
       PORT: "3000"
       BACKEND_INTERNAL_URL: http://backend:4000
+      # Absolute URLs in canonical / Open Graph / sitemap / robots (lib/env.ts
+      # resolveSiteOrigin): PUBLIC_WEB_ORIGIN, else https://SHOPINO_DOMAIN.
+      SHOPINO_DOMAIN: ${SHOPINO_DOMAIN:?SHOPINO_DOMAIN is required}
+      PUBLIC_WEB_ORIGIN: ${PUBLIC_WEB_ORIGIN:-}
     read_only: true
     tmpfs:
       - /tmp:size=64m

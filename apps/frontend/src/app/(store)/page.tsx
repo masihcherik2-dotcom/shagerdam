@@ -1,4 +1,5 @@
 import { ArrowLeft, BadgeCheck, CalendarClock, LayoutGrid, ShieldCheck, Sparkles, Truck } from 'lucide-react';
+import type { Metadata } from 'next';
 import Link from 'next/link';
 
 import { ProductGrid } from '@/components/catalog/product-card';
@@ -12,6 +13,9 @@ import { formatCount, formatPercent, toPersianDigits } from '@/lib/format';
 import { PLATFORM_NAME } from '@/lib/brand';
 
 export const dynamic = 'force-dynamic';
+
+/** Only the home page is canonical to `/` (set per page — see app/layout.tsx). */
+export const metadata: Metadata = { alternates: { canonical: '/' } };
 
 export default async function HomePage() {
   const [tree, popular, newest, plans, branding] = await Promise.all([

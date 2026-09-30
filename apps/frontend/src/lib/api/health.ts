@@ -1,26 +1,25 @@
 import { apiGet } from './client';
+import type { ComponentState, PublicStatusModule, PublicStatusReport } from './types';
 
-export type HealthCheckStatus = 'up' | 'down';
-export type HealthReportStatus = 'ok' | 'error' | 'shutting_down';
+const STATES: readonly ComponentState[] = ['operational', 'degraded', 'outage'];
+const MODULES: readonly PublicStatusModule[] = ['storefront', 'orders', 'payments', 'bnpl', 'auth'];
 
-/** Payload of a single terminus indicator. */
-export interface HealthIndicatorDetail {
-  status: HealthCheckStatus;
-  latency_ms?: number;
-  uptime_seconds?: number;
-  started_at?: string;
-  message?: string;
+/** Runtime check of `GET /health/status` (the page must never render an unexpected shape). */
+export function isPublicStatusReport(value: unknown): value is PublicStatusReport {
+  if (typeof value !== 'object' || value === null) return false;
+  const report = value as Partial<PublicStatusReport>;
+  return (
+    STATES.includes(report.status as ComponentState) &&
+    typeof report.checkedAt === 'string' &&
+    Array.isArray(report.modules) &&
+    report.modules.every((module) => MODULES.includes(module.key) && STATES.includes(module.status))
+  );
 }
 
-/** Response shape of `GET /api/v1/health` (see @nestjs/terminus). */
-export interface SystemHealth {
-  status: HealthReportStatus;
-  info?: Record<string, HealthIndicatorDetail>;
-  error?: Record<string, HealthIndicatorDetail>;
-  details: Record<string, HealthIndicatorDetail>;
-}
-
-/** Fetches the backend health report from the browser. */
-export async function getSystemHealth(): Promise<SystemHealth> {
-  return apiGet<SystemHealth>('/health');
+/**
+ * Public, sanitized status (business capabilities only) through the BFF.
+ * The detailed operator probe `GET /health` is not reachable from the browser.
+ */
+export async function getPublicStatus(): Promise<PublicStatusReport> {
+  return apiGet<PublicStatusReport>('/health/status');
 }
