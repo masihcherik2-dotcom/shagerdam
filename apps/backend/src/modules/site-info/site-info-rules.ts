@@ -21,6 +21,7 @@
  * | `site.enamad_image_url`    | eNamad badge image (https://trustseal.enamad.ir/logo.aspx…) |
  * | `site.samandehi_link_url`  | Samandehi verify URL (https://logo.samandehi.ir/Verify.aspx…) |
  * | `site.samandehi_image_url` | Samandehi badge image (https://logo.samandehi.ir/logo.aspx…) |
+ * | `site.google_site_verification` | Google Search Console token (`content` of the `google-site-verification` meta tag) |
  *
  * The seal URLs are the ones issued by enamad.ir / samandehi.ir for this
  * domain; only those two hosts are accepted so the footer can never be made
@@ -42,6 +43,7 @@ export const SITE_INFO_KEYS = {
   enamadImageUrl: 'site.enamad_image_url',
   samandehiLinkUrl: 'site.samandehi_link_url',
   samandehiImageUrl: 'site.samandehi_image_url',
+  googleVerificationTag: 'site.google_site_verification',
 } as const;
 
 export type SiteInfoField = keyof typeof SITE_INFO_KEYS;
@@ -50,7 +52,7 @@ export const SITE_INFO_KEY_LIST: string[] = Object.values(SITE_INFO_KEYS);
 
 export type SiteInfoValues = Record<SiteInfoField, string | null>;
 
-export const SITE_INFO_CACHE_KEY = 'site-info:public:v1';
+export const SITE_INFO_CACHE_KEY = 'site-info:public:v2';
 export const SITE_INFO_CACHE_TTL_SECONDS = 600;
 export const SITE_INFO_DELAYED_INVALIDATION_MS = 2_000;
 export const SITE_INFO_AUDIT_ENTITY = 'SiteInfo';
@@ -68,7 +70,24 @@ export const MAX_LENGTH: Readonly<Record<SiteInfoField, number>> = {
   enamadImageUrl: 500,
   samandehiLinkUrl: 500,
   samandehiImageUrl: 500,
+  googleVerificationTag: 100,
 };
+
+/** Google's verification tokens are URL-safe base64-like strings (typically 43 characters). */
+const GOOGLE_TOKEN_PATTERN = /^[A-Za-z0-9_-]{10,100}$/;
+
+/**
+ * Accepts either the bare token or the whole tag Search Console shows
+ * (`<meta name="google-site-verification" content="…" />`) and returns the token.
+ */
+export function extractGoogleVerificationToken(raw: string): string {
+  const trimmed = raw.trim();
+  const fromTag = /content\s*=\s*["']([^"']*)["']/i.exec(trimmed);
+  if (fromTag && /google-site-verification/i.test(trimmed)) {
+    return fromTag[1]!.trim();
+  }
+  return trimmed;
+}
 
 const SEAL_HOSTS: Readonly<Partial<Record<SiteInfoField, { host: string; path: RegExp }>>> = {
   enamadLinkUrl: { host: 'trustseal.enamad.ir', path: /^\/$/ },
@@ -93,6 +112,9 @@ export function normalizeField(field: SiteInfoField, raw: string): string {
   if (field === 'supportEmail') {
     return trimmed.toLowerCase();
   }
+  if (field === 'googleVerificationTag') {
+    return extractGoogleVerificationToken(raw);
+  }
   return trimmed;
 }
 
@@ -116,6 +138,10 @@ export function fieldProblem(field: SiteInfoField, value: string): string | null
       return /^0\d{2,4}-?\d{4,8}$/.test(value) ? null : 'supportPhone must look like 021-91000000 or 09121234567';
     case 'supportEmail':
       return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value) ? null : 'supportEmail must be a valid e-mail address';
+    case 'googleVerificationTag':
+      return GOOGLE_TOKEN_PATTERN.test(value)
+        ? null
+        : 'googleVerificationTag must be the Search Console token (letters, digits, - and _) or the full google-site-verification meta tag';
     default:
       break;
   }

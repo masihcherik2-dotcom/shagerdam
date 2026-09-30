@@ -56,7 +56,22 @@ export function validateBasics(value: ProductBasics): { errors: Record<string, s
   };
 }
 
-export function ProductBasicsFields({ value, onChange, errors }: { value: ProductBasics; onChange: (value: ProductBasics) => void; errors: Record<string, string> }) {
+export function ProductBasicsFields({
+  value,
+  onChange,
+  errors,
+  imageUpload = true,
+}: {
+  value: ProductBasics;
+  onChange: (value: ProductBasics) => void;
+  errors: Record<string, string>;
+  /**
+   * Direct upload into the signed-in user's media library. Off for staff
+   * creating a product for a store: product images must belong to the store
+   * owner, so staff bring images through the link importer (owner's library).
+   */
+  imageUpload?: boolean;
+}) {
   const tree = useApi<CategoryTree>('/categories/tree');
   const set = <K extends keyof ProductBasics>(key: K, next: ProductBasics[K]) => onChange({ ...value, [key]: next });
   const options = tree.data ? flattenCategories(tree.data.items) : [];
@@ -95,20 +110,55 @@ export function ProductBasicsFields({ value, onChange, errors }: { value: Produc
         {(id) => <Textarea id={id} rows={5} maxLength={20000} value={value.description} onChange={(event) => set('description', event.target.value)} />}
       </Field>
       <div className="md:col-span-2">
-        <FileDrop
-          upload={{ kind: 'image', purpose: 'product_image' }}
-          value={value.images}
-          onChange={(images) => set('images', images)}
-          max={MAX_MEDIA_PER_PRODUCT}
-          accept="image/jpeg,image/png,image/webp"
-          label="تصاویر محصول"
-          hint={`حداکثر ${toPersianDigits(MAX_MEDIA_PER_PRODUCT)} تصویر؛ تصویر اول، تصویر اصلی است. ترتیب را با دکمه‌ها تغییر دهید.`}
-          orderable
-        />
+        {imageUpload ? (
+          <FileDrop
+            upload={{ kind: 'image', purpose: 'product_image' }}
+            value={value.images}
+            onChange={(images) => set('images', images)}
+            max={MAX_MEDIA_PER_PRODUCT}
+            accept="image/jpeg,image/png,image/webp"
+            label="تصاویر محصول"
+            hint={`حداکثر ${toPersianDigits(MAX_MEDIA_PER_PRODUCT)} تصویر؛ تصویر اول، تصویر اصلی است. ترتیب را با دکمه‌ها تغییر دهید.`}
+            orderable
+          />
+        ) : (
+          <ImportedImages images={value.images} onChange={(images) => set('images', images)} />
+        )}
       </div>
       <div className="md:col-span-2">
         <Checkbox label="پس از ذخیره در فروشگاه منتشر شود" checked={value.isPublished} onChange={(event) => set('isPublished', event.target.checked)} />
       </div>
+    </div>
+  );
+}
+
+/** Read-only gallery of imported images (staff mode): remove only, no direct upload. */
+function ImportedImages({ images, onChange }: { images: UploadedFile[]; onChange: (images: UploadedFile[]) => void }) {
+  return (
+    <div className="flex flex-col gap-2" data-testid="imported-images">
+      <p className="text-sm font-medium text-slate-700">تصاویر محصول</p>
+      {images.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-slate-500">
+          تصاویر از طریق «واردکردن از لینک کالا» در کتابخانهٔ رسانهٔ فروشنده ذخیره و این‌جا نمایش داده می‌شوند.
+        </p>
+      ) : (
+        <ul className="flex flex-wrap gap-2">
+          {images.map((image, index) => (
+            <li key={image.id} className="relative">
+              {/* eslint-disable-next-line @next/next/no-img-element -- media-storage URL, sized thumbnail */}
+              <img src={image.thumbnailUrl ?? image.url} alt={image.name} className="size-20 rounded-xl border border-slate-200 object-cover" />
+              <button
+                type="button"
+                onClick={() => onChange(images.filter((entry) => entry.id !== image.id))}
+                className="absolute -top-2 -left-2 rounded-full bg-rose-600 px-1.5 text-xs text-white"
+                aria-label={`حذف تصویر ${toPersianDigits(index + 1)}`}
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

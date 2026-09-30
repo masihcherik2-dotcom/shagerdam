@@ -1,13 +1,16 @@
 'use client';
 
-import { ChevronLeft, Search, Store } from 'lucide-react';
+import { ChevronLeft, Plus, Search, Store } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 
+import { useSession } from '@/components/providers/session-provider';
+import { LinkButton } from '@/components/ui/button';
 import { Input } from '@/components/ui/field';
 import { PageHeader, Pagination, StatusBadge, Table, Td } from '@/components/ui/misc';
 import { AsyncView, EmptyState, SkeletonRows } from '@/components/ui/states';
 import type { Page, VendorAdminSummary, VendorStatus } from '@/lib/api/types';
+import { can } from '@/lib/auth/access';
 import { useApi, useDebounced } from '@/lib/hooks/use-api';
 import { formatCount, formatDateTime, formatMobile } from '@/lib/format';
 import { VENDOR_STATUS } from '@/lib/labels';
@@ -15,6 +18,7 @@ import { VENDOR_STATUS } from '@/lib/labels';
 const FILTERS: Array<VendorStatus | ''> = ['PENDING', 'APPROVED', 'REJECTED', 'SUSPENDED', ''];
 
 export default function AdminVendorsPage() {
+  const { user } = useSession();
   const [status, setStatus] = useState<VendorStatus | ''>('PENDING');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -23,7 +27,17 @@ export default function AdminVendorsPage() {
 
   return (
     <>
-      <PageHeader title="فروشندگان و احراز هویت" description="بررسی درخواست‌های فروشندگی و مدارک KYC" />
+      <PageHeader
+        title="فروشندگان و احراز هویت"
+        description="بررسی درخواست‌های فروشندگی و مدارک KYC"
+        action={
+          can(user?.role, 'manageVendors') ? (
+            <LinkButton href="/admin/vendors/create" icon={<Plus className="size-4" />} data-testid="admin-create-vendor-link">
+              ایجاد فروشگاه
+            </LinkButton>
+          ) : undefined
+        }
+      />
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="flex flex-wrap gap-2">
           {FILTERS.map((value) => (

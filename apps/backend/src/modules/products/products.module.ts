@@ -17,6 +17,6 @@ import { VendorProductsController } from './vendor-products.controller';
   imports: [CategoriesModule, TorobCacheModule],
   controllers: [ProductsController, VendorProductsController, AdminProductsController],
   providers: [ProductsService, CatalogSearchService, InventoryService],
-  exports: [InventoryService],
+  exports: [InventoryService, ProductsService],
 })
 export class ProductsModule {}

@@ -2,6 +2,8 @@
 module.exports = {
   moduleFileExtensions: ['js', 'json', 'ts'],
   rootDir: 'src',
+  // Seed helpers (prisma/demo) have pure unit tests too.
+  roots: ['<rootDir>', '<rootDir>/../prisma'],
   testRegex: '.*\\.spec\\.ts$',
   transform: {
     '^.+\\.ts$': [

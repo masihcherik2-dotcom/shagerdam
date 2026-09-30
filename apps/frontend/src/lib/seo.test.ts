@@ -1,7 +1,21 @@
 import { describe, expect, it } from 'vitest';
 
 import type { CategoryTreeNode, ProductDetail } from './api/types';
-import { absoluteUrl, flattenCategorySlugs, productBreadcrumbJsonLd, productJsonLd, productMetaDescription, ROBOTS_DISALLOW, schemaPrice, serializeJsonLd } from './seo';
+import {
+  absoluteUrl,
+  categoryBreadcrumbJsonLd,
+  flattenCategorySlugs,
+  organizationJsonLd,
+  productBreadcrumbJsonLd,
+  productJsonLd,
+  productMetaDescription,
+  ROBOTS_ALLOW,
+  ROBOTS_DISALLOW,
+  schemaPrice,
+  serializeJsonLd,
+  STATIC_SITEMAP_PATHS,
+  websiteJsonLd,
+} from './seo';
 
 const ORIGIN = 'https://shagerdam.ir';
 
@@ -107,5 +121,49 @@ describe('seo helpers', () => {
     expect(long.length).toBeLessThanOrEqual(160);
     expect(long.endsWith('…')).toBe(true);
     expect(productMetaDescription({ ...base, description: null, brand: 'شاپینو' })).toBe('خرید شاپینو تی‌شرت نخی از فروشگاه فروشگاه نمونه');
+  });
+});
+
+describe('home / category structured data', () => {
+  const origin = 'https://shagerdam.ir';
+
+  it('Organization carries only configured facts', () => {
+    expect(organizationJsonLd({ origin, name: 'شاگردم' })).toEqual({
+      '@context': 'https://schema.org',
+      '@type': 'Organization',
+      '@id': 'https://shagerdam.ir/#organization',
+      name: 'شاگردم',
+      url: 'https://shagerdam.ir/',
+    });
+    const full = organizationJsonLd({ origin, name: 'شاگردم', legalName: 'شرکت نمونه', logoUrl: '/media/logo.webp', supportPhone: '02112345678', supportEmail: null });
+    expect(full).toMatchObject({ legalName: 'شرکت نمونه', logo: 'https://shagerdam.ir/media/logo.webp' });
+    expect(full.contactPoint).toEqual([{ '@type': 'ContactPoint', contactType: 'customer support', areaServed: 'IR', availableLanguage: ['fa'], telephone: '02112345678' }]);
+  });
+
+  it('WebSite SearchAction targets /search?q=', () => {
+    const site = websiteJsonLd(origin, 'شاگردم');
+    expect(site.potentialAction).toEqual({
+      '@type': 'SearchAction',
+      target: { '@type': 'EntryPoint', urlTemplate: 'https://shagerdam.ir/search?q={search_term_string}' },
+      'query-input': 'required name=search_term_string',
+    });
+  });
+
+  it('category BreadcrumbList walks home → ancestors → category', () => {
+    const list = categoryBreadcrumbJsonLd(
+      { breadcrumbs: [{ id: '1', slug: 'digital', titleFa: 'کالای دیجیتال', titleEn: null }, { id: '2', slug: 'mobile', titleFa: 'موبایل', titleEn: null }] },
+      origin,
+      'شاگردم',
+    );
+    expect(list.itemListElement).toEqual([
+      { '@type': 'ListItem', position: 1, name: 'شاگردم', item: 'https://shagerdam.ir/' },
+      { '@type': 'ListItem', position: 2, name: 'کالای دیجیتال', item: 'https://shagerdam.ir/categories/digital' },
+      { '@type': 'ListItem', position: 3, name: 'موبایل', item: 'https://shagerdam.ir/categories/mobile' },
+    ]);
+  });
+
+  it('the vendor landing is crawlable despite the /vendor/ disallow', () => {
+    expect(ROBOTS_ALLOW).toContain('/vendor/landing');
+    expect(STATIC_SITEMAP_PATHS.map((entry) => entry.path)).toContain('/vendor/landing');
   });
 });

@@ -14,6 +14,7 @@ export class PublicSiteInfoDto {
   @ApiProperty({ type: String, nullable: true }) enamadImageUrl!: string | null;
   @ApiProperty({ type: String, nullable: true, description: 'نشانی تأیید نشان ساماندهی (logo.samandehi.ir)' }) samandehiLinkUrl!: string | null;
   @ApiProperty({ type: String, nullable: true }) samandehiImageUrl!: string | null;
+  @ApiProperty({ type: String, nullable: true, description: 'توکن تأیید Google Search Console؛ در تگ meta با نام google-site-verification درج می‌شود.' }) googleVerificationTag!: string | null;
 }
 
 export class SiteInfoHistoryEntryDto {
@@ -47,4 +48,5 @@ export class UpdateSiteInfoDto {
   @ApiPropertyOptional({ type: String, nullable: true }) @IsOptional() @ValidateIf((_, v) => v !== null) @IsString() @MaxLength(500) enamadImageUrl?: string | null;
   @ApiPropertyOptional({ type: String, nullable: true }) @IsOptional() @ValidateIf((_, v) => v !== null) @IsString() @MaxLength(500) samandehiLinkUrl?: string | null;
   @ApiPropertyOptional({ type: String, nullable: true }) @IsOptional() @ValidateIf((_, v) => v !== null) @IsString() @MaxLength(500) samandehiImageUrl?: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true, description: 'توکن یا کل تگ meta که Search Console می‌دهد' }) @IsOptional() @ValidateIf((_, v) => v !== null) @IsString() @MaxLength(300) googleVerificationTag?: string | null;
 }

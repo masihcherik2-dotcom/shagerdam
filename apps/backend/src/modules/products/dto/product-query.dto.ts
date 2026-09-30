@@ -97,6 +97,12 @@ export class PublicProductQueryDto extends PaginationQueryDto {
   @IsBoolean()
   inStockOnly?: boolean;
 
+  @ApiPropertyOptional({ description: 'Only products with at least one discounted variant (compareAtPrice > price); combined with the other variant filters on the same variant.' })
+  @IsOptional()
+  @Transform(toBoolean)
+  @IsBoolean()
+  onSaleOnly?: boolean;
+
   @ApiPropertyOptional({
     type: [String],
     example: ['مشکی', '#1D4ED8'],

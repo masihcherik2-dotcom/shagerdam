@@ -412,6 +412,10 @@ export SHOPINO_ENV_FILE=/opt/shopino/.env.production
 C="docker compose -f docker-compose.prod.yml --env-file $SHOPINO_ENV_FILE"
 $C run --rm migrate                                                     # migrations
 $C run --rm migrate ts-node --project tsconfig.json prisma/seed.ts      # seed
+# Optional demo catalogue (4 stores, 54 products, images) — HIDDEN by default in production:
+# products unpublished, owner accounts inactive; publish/replace them from the admin panel.
+# Owner mobiles: set DEMO_VENDOR_MOBILES (4 comma-separated numbers) or the placeholders are used.
+$C run --rm -e SEED_PROFILE=demo migrate ts-node --project tsconfig.json prisma/seed.ts
 $C ps                                                                   # all "healthy"
 $C logs -f --tail=100 backend
 ```

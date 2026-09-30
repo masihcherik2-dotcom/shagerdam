@@ -251,6 +251,9 @@ export class CatalogSearchService {
     if (query.inStockOnly === true) {
       conditions.push(Prisma.sql`pv.stock_quantity - pv.reserved_quantity > 0`);
     }
+    if (query.onSaleOnly === true) {
+      conditions.push(Prisma.sql`pv.compare_at_price IS NOT NULL AND pv.compare_at_price > pv.price`);
+    }
     if (query.colors !== undefined && query.colors.length > 0) {
       const hexes = query.colors.map((color) => color.toUpperCase()).filter((color) => COLOR_HEX_PATTERN.test(color));
       const names = query.colors

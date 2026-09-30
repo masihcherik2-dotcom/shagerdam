@@ -202,6 +202,29 @@ export interface RegisterVendorParams {
   bankAccountHolder: string;
 }
 
+export interface AdminCreateVendorParams {
+  actorId: string;
+  context: RequestContext;
+  storeName: string;
+  storeSlug: string;
+  /** E.164 (+989XXXXXXXXX). */
+  ownerMobile: string;
+  ownerFullName: string;
+  bankIban: string;
+  bankAccountHolder?: string;
+  commissionRateOverride?: number | null;
+  instagramHandle?: string;
+  bio?: string;
+  /** Public logo URL produced by the media pipeline (demo catalogue loader only). */
+  logoUrl?: string | null;
+  /**
+   * false = the owner account is created deactivated (cannot sign in). Used by
+   * the hidden demo catalogue so a stranger owning the placeholder mobile can
+   * never enter the store. Default true.
+   */
+  ownerActive?: boolean;
+}
+
 export interface SubmitVerificationParams {
   userId: string;
   nationalIdCardUrl: string;
@@ -332,6 +355,119 @@ export class VendorsService {
     } catch (error) {
       throw this.translateUniqueViolation(error, storeSlug);
     }
+  }
+
+  // ─── Admin-created stores ─────────────────────────────────────────────────
+
+  /**
+   * An administrator opens a store for a seller: owner account (found by mobile
+   * or created), store, wallet and audit row in one transaction.
+   *
+   * The store is `APPROVED` at once — the administrator takes responsibility for
+   * the identity check, which the audit row records (`kycBy: ADMIN_CREATED`) and
+   * `verifiedAt` dates. The owner gets the `VENDOR` role and signs in with the
+   * normal mobile OTP; no password is created. An existing account is reused
+   * only when it is an active, non-staff account without a store.
+   */
+  async createByAdmin(params: AdminCreateVendorParams): Promise<{ profile: VendorProfileView; ownerCreated: boolean; auditLogId: string }> {
+    const storeSlug = params.storeSlug.trim().toLowerCase();
+    if (RESERVED_SLUGS.has(storeSlug)) {
+      throw new BadRequestException(`The store slug "${storeSlug}" is reserved by the platform`);
+    }
+    const ownerActive = params.ownerActive ?? true;
+    const commissionRateOverride = params.commissionRateOverride ?? null;
+    const verifiedAt = new Date();
+
+    try {
+      const outcome = await this.prisma.$transaction(async (tx) => {
+        const slugTaken = await tx.vendor.findUnique({ where: { storeSlug }, select: { id: true } });
+        if (slugTaken !== null) {
+          throw new ConflictException(`The store slug "${storeSlug}" is already taken`);
+        }
+
+        let owner = await tx.user.findUnique({
+          where: { mobile: params.ownerMobile },
+          select: { id: true, role: true, isActive: true, vendor: { select: { id: true } } },
+        });
+        let ownerCreated = false;
+        if (owner !== null) {
+          if (STAFF_ROLES.has(owner.role)) {
+            throw new ConflictException('This mobile belongs to a staff account; a staff account cannot own a store');
+          }
+          if (owner.vendor !== null) {
+            throw new ConflictException('This mobile already owns a store');
+          }
+          if (!owner.isActive) {
+            throw new ConflictException('The account of this mobile is deactivated; reactivate it before opening a store');
+          }
+          await tx.user.update({ where: { id: owner.id }, data: { role: UserRole.VENDOR }, select: { id: true } });
+        } else {
+          owner = await tx.user.create({
+            data: { mobile: params.ownerMobile, fullName: params.ownerFullName, role: UserRole.VENDOR, isActive: ownerActive },
+            select: { id: true, role: true, isActive: true, vendor: { select: { id: true } } },
+          });
+          ownerCreated = true;
+        }
+
+        const vendor = await tx.vendor.create({
+          data: {
+            userId: owner.id,
+            storeName: params.storeName,
+            storeSlug,
+            instagramHandle: normalizeInstagramHandle(params.instagramHandle),
+            logoUrl: params.logoUrl ?? null,
+            bio: params.bio ?? null,
+            bankIban: normalizeSheba(params.bankIban),
+            bankAccountHolder: params.bankAccountHolder ?? params.ownerFullName,
+            commissionRateOverride: commissionRateOverride === null ? null : new Prisma.Decimal(commissionRateOverride.toFixed(2)),
+            status: VendorStatus.APPROVED,
+            verifiedAt,
+          },
+          select: { id: true },
+        });
+        await tx.vendorWallet.create({ data: { vendorId: vendor.id }, select: { id: true } });
+
+        const audit = await tx.auditLog.create({
+          data: {
+            userId: params.actorId,
+            action: AuditAction.CREATE,
+            entityName: 'Vendor',
+            entityId: vendor.id,
+            ipAddress: params.context.ipAddress,
+            userAgent: params.context.userAgent,
+            newValue: sanitize({
+              storeName: params.storeName,
+              storeSlug,
+              status: VendorStatus.APPROVED,
+              verifiedAt,
+              kycBy: 'ADMIN_CREATED',
+              ownerUserId: owner.id,
+              ownerCreated,
+              ownerActive: ownerCreated ? ownerActive : owner.isActive,
+              bankIban: maskSheba(params.bankIban),
+              commissionRateOverride: commissionRateOverride?.toFixed(2) ?? null,
+            }) as Prisma.InputJsonValue,
+          },
+          select: { id: true },
+        });
+        return { vendorId: vendor.id, ownerCreated, auditLogId: audit.id };
+      });
+
+      this.logger.log(`Vendor ${outcome.vendorId} ("${storeSlug}") created and approved by admin ${params.actorId} (audit ${outcome.auditLogId})`);
+      await this.torobFeedCache.invalidate();
+      return { profile: await this.requireProfileByVendorId(outcome.vendorId), ownerCreated: outcome.ownerCreated, auditLogId: outcome.auditLogId };
+    } catch (error) {
+      throw this.translateUniqueViolation(error, storeSlug);
+    }
+  }
+
+  /** userId of a store's owner, for staff actions performed on the store's behalf. */
+  async ownerUserIdOf(vendorId: string): Promise<string> {
+    const vendor = await this.prisma.vendor.findUnique({ where: { id: vendorId }, select: { userId: true } });
+    if (vendor === null) {
+      throw new NotFoundException('Vendor not found');
+    }
+    return vendor.userId;
   }
 
   // ─── KYC documents ────────────────────────────────────────────────────────

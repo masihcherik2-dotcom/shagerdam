@@ -13,6 +13,7 @@ export const EMPTY_SITE_INFO: SiteInfo = {
   enamadImageUrl: null,
   samandehiLinkUrl: null,
   samandehiImageUrl: null,
+  googleVerificationTag: null,
 };
 
 /** Keeps only string values of known fields; anything else is "not set". */
@@ -51,4 +52,5 @@ export const SITE_INFO_FIELD_LABELS: Record<string, string> = {
   enamadImageUrl: 'تصویر نماد اینماد',
   samandehiLinkUrl: 'لینک تأیید ساماندهی',
   samandehiImageUrl: 'تصویر نشان ساماندهی',
+  googleVerificationTag: 'کد تأیید Google Search Console',
 };

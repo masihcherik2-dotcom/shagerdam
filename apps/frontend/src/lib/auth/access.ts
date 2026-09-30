@@ -17,10 +17,14 @@ const DISPUTE_STAFF: readonly UserRole[] = ['SUPER_ADMIN', 'ADMIN', 'SUPPORT'];
 const PLATFORM_ADMIN: readonly UserRole[] = ['SUPER_ADMIN', 'ADMIN'];
 const ALL_STAFF: readonly UserRole[] = ['SUPER_ADMIN', 'ADMIN', 'FINANCIAL_OFFICER', 'SUPPORT'];
 
+/** Public pages inside otherwise protected areas (checked before RULES). */
+const PUBLIC_PATHS: readonly string[] = ['/vendor/landing'];
+
 /** Most specific prefix first. */
 const RULES: readonly RouteRule[] = [
   { prefix: '/vendor/register', roles: ['CUSTOMER', 'VENDOR'] },
   { prefix: '/vendor', roles: ['VENDOR'] },
+  { prefix: '/admin/vendors/create', roles: PLATFORM_ADMIN },
   { prefix: '/admin/vendors', roles: ADMIN_READ },
   { prefix: '/admin/products', roles: ADMIN_READ },
   { prefix: '/admin/financial', roles: FINANCE },
@@ -40,6 +44,9 @@ function matches(pathname: string, prefix: string): boolean {
 
 /** The rule protecting a path, or null for public pages. */
 export function ruleFor(pathname: string): RouteRule | null {
+  if (PUBLIC_PATHS.some((path) => matches(pathname, path))) {
+    return null;
+  }
   return RULES.find((rule) => matches(pathname, rule.prefix)) ?? null;
 }
 
@@ -80,6 +87,8 @@ export function safeNextPath(value: string | null | undefined): string | null {
 /** Staff capabilities that differ from mere page access (backend @Roles on the mutation routes). */
 export const CAPABILITIES = {
   reviewVendors: ['SUPER_ADMIN', 'ADMIN'],
+  /** Open stores and add products on a store's behalf (POST /admin/vendors, /admin/vendors/:id/products). */
+  manageVendors: ['SUPER_ADMIN', 'ADMIN'],
   moderateProducts: ['SUPER_ADMIN', 'ADMIN'],
   processSettlements: ['SUPER_ADMIN', 'FINANCIAL_OFFICER'],
   arbitrateDisputes: ['SUPER_ADMIN', 'ADMIN', 'SUPPORT'],

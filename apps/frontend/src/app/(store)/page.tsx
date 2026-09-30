@@ -1,68 +1,71 @@
-import { ArrowLeft, BadgeCheck, CalendarClock, LayoutGrid, ShieldCheck, Sparkles, Truck } from 'lucide-react';
+import { ArrowLeft, BadgeCheck, BadgePercent, CalendarClock, Flame, LayoutGrid, ShieldCheck, Sparkles, Store, Truck } from 'lucide-react';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 
 import { ProductGrid } from '@/components/catalog/product-card';
+import { CategoryIcon } from '@/components/home/category-icon';
 import { HeroCarousel } from '@/components/home/hero-carousel';
+import { HomeHero } from '@/components/home/home-hero';
 import { LinkButton } from '@/components/ui/button';
 import { EmptyState, ErrorState } from '@/components/ui/states';
 import { loadBranding } from '@/lib/api/branding.server';
 import { isBnplEnabled, loadCategoryTree, loadCreditPlans, loadProducts } from '@/lib/api/catalog.server';
+import { REVALIDATE } from '@/lib/api/public.server';
+import { loadSiteInfo } from '@/lib/api/site-info.server';
 import type { InstallmentPlan } from '@/lib/api/types';
-import { formatCount, formatPercent, toPersianDigits } from '@/lib/format';
 import { PLATFORM_NAME } from '@/lib/brand';
+import { resolveSiteOrigin } from '@/lib/env';
+import { formatCount, formatPercent, toPersianDigits } from '@/lib/format';
+import { organizationJsonLd, serializeJsonLd, websiteJsonLd } from '@/lib/seo';
 
-export const dynamic = 'force-dynamic';
+/** ISR window of the catalogue data (Data Cache); the HTML is rendered per request (session-aware header). */
+export const revalidate = 60;
 
 /** Only the home page is canonical to `/` (set per page — see app/layout.tsx). */
 export const metadata: Metadata = { alternates: { canonical: '/' } };
 
 export default async function HomePage() {
-  const [tree, popular, newest, plans, branding] = await Promise.all([
-    loadCategoryTree(),
-    loadProducts({ sortBy: 'popular', pageSize: 8, inStockOnly: true }),
-    loadProducts({ sortBy: 'newest', pageSize: 8 }),
-    loadCreditPlans(),
+  const ttl = REVALIDATE.home;
+  const [tree, popular, newest, offers, plans, branding, siteInfo] = await Promise.all([
+    loadCategoryTree(ttl),
+    loadProducts({ sortBy: 'popular', pageSize: 8, inStockOnly: true }, ttl),
+    loadProducts({ sortBy: 'newest', pageSize: 8 }, ttl),
+    // Special offers: in-stock discounted products (instalment-eligible when BNPL is on).
+    loadProducts({ sortBy: 'popular', pageSize: 8, inStockOnly: true, onSaleOnly: true }, ttl),
+    loadCreditPlans(ttl),
     loadBranding(),
+    loadSiteInfo(),
   ]);
   const bnpl = isBnplEnabled(plans);
   const planItems: InstallmentPlan[] = plans.ok ? plans.data.items : [];
   const zeroInterest = planItems.filter((plan) => Number(plan.interestRatePercent) === 0);
+  const longestPlan = planItems.reduce<InstallmentPlan | null>((best, plan) => (!best || plan.durationMonths > best.durationMonths ? plan : best), null);
+  const offerCount = offers.ok ? offers.data.total : 0;
+  const bestOffer = offers.ok ? Math.max(0, ...offers.data.items.map((item) => item.maxDiscountPercent ?? 0)) : 0;
+
+  const origin = resolveSiteOrigin();
+  const jsonLd = serializeJsonLd([
+    organizationJsonLd({
+      origin,
+      name: PLATFORM_NAME,
+      legalName: siteInfo.legalName,
+      logoUrl: branding.logoUrl,
+      supportPhone: siteInfo.supportPhone,
+      supportEmail: siteInfo.supportEmail,
+    }),
+    websiteJsonLd(origin, PLATFORM_NAME),
+  ]);
 
   return (
     <div className="flex flex-col gap-12">
-      {/* Hero: the admin-managed banner carousel when there are active banners, otherwise the default hero. */}
+      {/* Schema.org Organization + WebSite (SearchAction → /search?q=). */}
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd }} />
+
+      {/* Hero: the admin-managed banner carousel when there are active banners, otherwise the illustrated default hero. */}
       {branding.heroBanners.length > 0 ? (
         <HeroCarousel banners={branding.heroBanners} />
       ) : (
-        <section className="relative overflow-hidden rounded-3xl bg-gradient-to-l from-brand-700 via-brand-600 to-sky-500 px-6 py-12 text-white md:px-12 md:py-16">
-          <div className="relative z-10 flex max-w-2xl flex-col gap-5">
-            <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-xs font-medium">
-              <Sparkles className="size-3.5" /> بازار آنلاین چندفروشندگی
-            </span>
-            <h1 className="text-3xl font-black leading-tight md:text-5xl">هر چه می‌خواهید، از فروشگاه‌های تأییدشده؛ نقدی یا اقساطی</h1>
-            <p className="text-sm leading-7 text-white/85 md:text-base">
-              پول شما تا زمان تحویل کالا نزد {PLATFORM_NAME} امانت می‌ماند. سفارش از چند فروشگاه را یک‌جا پرداخت کنید و هر مرسوله را جداگانه پیگیری کنید.
-            </p>
-            <div className="flex flex-wrap gap-3">
-              <LinkButton href="/search" variant="secondary" size="lg" className="border-0 text-brand-700">
-                شروع خرید <ArrowLeft className="size-4" />
-              </LinkButton>
-              {bnpl ? (
-                <LinkButton href="/customer/credit" size="lg" className="bg-white/15 hover:bg-white/25">
-                  دریافت اعتبار خرید
-                </LinkButton>
-              ) : null}
-            </div>
-            {tree.ok ? (
-              <p className="text-xs text-white/75">
-                {formatCount(tree.data.totalProducts)} محصول در {formatCount(tree.data.totalCategories)} دسته‌بندی
-              </p>
-            ) : null}
-          </div>
-          <div className="pointer-events-none absolute -bottom-24 -left-24 size-80 rounded-full bg-white/10" />
-          <div className="pointer-events-none absolute -top-16 left-40 size-48 rounded-full bg-white/10" />
-        </section>
+        <HomeHero bnplEnabled={bnpl} totals={tree.ok ? { products: tree.data.totalProducts, categories: tree.data.totalCategories } : null} />
       )}
 
       {/* Trust strip */}
@@ -90,14 +93,17 @@ export default async function HomePage() {
         ) : tree.data.items.length === 0 ? (
           <EmptyState title="هنوز دسته‌بندی فعالی وجود ندارد" />
         ) : (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5" data-testid="home-categories">
             {tree.data.items.map((category) => (
               <Link
                 key={category.id}
                 href={`/categories/${category.slug}`}
+                data-testid="home-category"
                 className="flex flex-col items-center gap-2 rounded-2xl border border-slate-200 bg-white p-4 text-center transition hover:border-brand-300 hover:shadow-sm"
               >
-                <span className="flex size-12 items-center justify-center rounded-2xl bg-brand-50 text-lg font-black text-brand-700">{category.titleFa.charAt(0)}</span>
+                <span className="flex size-12 items-center justify-center rounded-2xl bg-brand-50 text-brand-700">
+                  <CategoryIcon slug={category.slug} className="size-6" />
+                </span>
                 <span className="text-sm font-bold text-slate-800">{category.titleFa}</span>
                 <span className="text-xs text-slate-500">{formatCount(category.totalProductCount)} محصول</span>
               </Link>
@@ -141,6 +147,18 @@ export default async function HomePage() {
         </section>
       ) : null}
 
+      {/* Special offers (discounted, in stock; instalment badge when BNPL is on) */}
+      {offers.ok && offers.data.items.length > 0 ? (
+        <section className="flex flex-col gap-4" data-testid="home-offers">
+          <SectionTitle
+            icon={<BadgePercent className="size-5" />}
+            title={bnpl ? 'پیشنهادهای ویژهٔ اقساطی' : 'پیشنهادهای ویژه'}
+            href="/search?onSale=1&inStock=1&sort=popular"
+          />
+          <ProductGrid products={offers.data.items} bnplEnabled={bnpl} />
+        </section>
+      ) : null}
+
       {/* Featured (best sellers) */}
       <section className="flex flex-col gap-4">
         <SectionTitle icon={<Sparkles className="size-5" />} title="پرفروش‌ترین‌ها" href="/search?sort=popular" />
@@ -153,8 +171,55 @@ export default async function HomePage() {
         )}
       </section>
 
+      {/* Mid-page banners — every figure comes from the live catalogue / plans. */}
+      <section className="grid gap-4 md:grid-cols-2" data-testid="home-mid-banners">
+        {offerCount > 0 ? (
+          <Link
+            href="/search?onSale=1"
+            className="group relative flex min-h-36 flex-col justify-center gap-2 overflow-hidden rounded-3xl bg-gradient-to-l from-rose-600 to-orange-500 p-6 text-white"
+            data-testid="banner-discounts"
+          >
+            <Flame className="size-7" aria-hidden="true" />
+            <p className="text-xl font-black">{formatCount(offerCount)} کالای تخفیف‌دار موجود</p>
+            <p className="text-sm text-white/85">
+              {bestOffer > 0 ? `تخفیف تا ${formatPercent(bestOffer)} روی کالاهای منتخب` : 'تخفیف‌های فعال فروشگاه‌ها'} — مشاهدهٔ همه
+              <ArrowLeft className="ms-1 inline size-4 transition group-hover:-translate-x-1" aria-hidden="true" />
+            </p>
+          </Link>
+        ) : null}
+        {bnpl && longestPlan ? (
+          <Link
+            href="/customer/credit"
+            className="group relative flex min-h-36 flex-col justify-center gap-2 overflow-hidden rounded-3xl bg-gradient-to-l from-emerald-600 to-teal-500 p-6 text-white"
+            data-testid="banner-credit"
+          >
+            <CalendarClock className="size-7" aria-hidden="true" />
+            <p className="text-xl font-black">
+              {zeroInterest.length > 0 ? `اقساط ${toPersianDigits(zeroInterest[0]!.durationMonths)} ماهه بدون سود` : `پرداخت تا ${toPersianDigits(longestPlan.durationMonths)} قسط`}
+            </p>
+            <p className="text-sm text-white/85">
+              اعتبار خرید بگیرید و از همهٔ فروشگاه‌ها قسطی بخرید
+              <ArrowLeft className="ms-1 inline size-4 transition group-hover:-translate-x-1" aria-hidden="true" />
+            </p>
+          </Link>
+        ) : (
+          <Link
+            href="/vendor/landing"
+            className="group relative flex min-h-36 flex-col justify-center gap-2 overflow-hidden rounded-3xl bg-gradient-to-l from-brand-700 to-indigo-500 p-6 text-white"
+            data-testid="banner-sell"
+          >
+            <Store className="size-7" aria-hidden="true" />
+            <p className="text-xl font-black">در {PLATFORM_NAME} بفروشید</p>
+            <p className="text-sm text-white/85">
+              فروشگاه خود را ثبت کنید و به خریداران سراسر کشور بفروشید
+              <ArrowLeft className="ms-1 inline size-4 transition group-hover:-translate-x-1" aria-hidden="true" />
+            </p>
+          </Link>
+        )}
+      </section>
+
       <section className="flex flex-col gap-4">
-        <SectionTitle title="تازه‌ترین محصولات" href="/search?sort=newest" />
+        <SectionTitle icon={<Flame className="size-5" />} title="تازه‌ترین محصولات" href="/search?sort=newest" />
         {!newest.ok ? (
           <ErrorState error={newest.message} title="محصولات بارگذاری نشد" />
         ) : newest.data.items.length === 0 ? (

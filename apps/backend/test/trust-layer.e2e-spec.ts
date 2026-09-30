@@ -42,7 +42,7 @@ interface ErrorBody {
   retryAfterSeconds?: number;
 }
 type SiteInfo = Record<string, string | null>;
-interface AdminSiteInfo extends SiteInfo {}
+type AdminSiteInfo = SiteInfo;
 interface Receipt {
   id: string;
   reference: string;
@@ -199,7 +199,8 @@ describe('Trust layer — public status, business identity, contact form (live s
       const response = await request<SiteInfo>('/site-info');
       expect(response.status).toBe(200);
       expect(Object.values(response.body).every((value) => value === null)).toBe(true);
-      expect(Object.keys(response.body)).toHaveLength(12);
+      expect(Object.keys(response.body)).toHaveLength(13);
+      expect(response.body).toHaveProperty('googleVerificationTag', null);
     });
 
     it('is managed by admins only', async () => {

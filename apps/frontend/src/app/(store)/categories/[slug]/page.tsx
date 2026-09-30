@@ -2,24 +2,38 @@ import { ChevronLeft } from 'lucide-react';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { Suspense } from 'react';
+import { cache, Suspense } from 'react';
 
 import { ProductBrowser } from '@/components/catalog/product-browser';
 import { SkeletonCards } from '@/components/ui/states';
-import { isBnplEnabled, loadCreditPlans } from '@/lib/api/catalog.server';
-import { serverApiOrNull } from '@/lib/api/server';
-import type { CategoryDetail, CategoryTree, CategoryTreeNode } from '@/lib/api/types';
+import { isBnplEnabled, loadCategoryTree, loadCreditPlans, loadProducts } from '@/lib/api/catalog.server';
+import { publicApiOrNull, REVALIDATE } from '@/lib/api/public.server';
+import type { CategoryDetail, CategoryTreeNode } from '@/lib/api/types';
+import { resolveSiteOrigin } from '@/lib/env';
 import { formatCount } from '@/lib/format';
 import { PLATFORM_NAME } from '@/lib/brand';
+import { parseListingParams, toProductQuery } from '@/lib/search-params';
+import { categoryBreadcrumbJsonLd, serializeJsonLd } from '@/lib/seo';
 
-export const dynamic = 'force-dynamic';
+/** ISR window of the category data (Data Cache); the HTML is rendered per request (session-aware header). */
+export const revalidate = 120;
 
-type Props = { params: Promise<{ slug: string }> };
+type Props = { params: Promise<{ slug: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> };
+
+const loadCategory = cache((slug: string) =>
+  publicApiOrNull<CategoryDetail>(`categories/${encodeURIComponent(slug)}`, { revalidate: REVALIDATE.category, tags: ['catalog'] }),
+);
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
-  const category = await serverApiOrNull<CategoryDetail>(`categories/${encodeURIComponent(slug)}`).catch(() => null);
-  return { title: category ? category.titleFa : 'دسته‌بندی' };
+  const category = await loadCategory(slug).catch(() => null);
+  if (!category) return { title: 'دسته‌بندی', robots: { index: false } };
+  const path = `/categories/${encodeURIComponent(category.slug)}`;
+  return {
+    title: category.titleFa,
+    description: `خرید نقدی و اقساطی ${category.titleFa} از فروشگاه‌های تأییدشدهٔ ${PLATFORM_NAME} — ${formatCount(category.totalProductCount)} محصول.`,
+    alternates: { canonical: path },
+  };
 }
 
 function findNode(nodes: CategoryTreeNode[], id: string): CategoryTreeNode | null {
@@ -31,22 +45,28 @@ function findNode(nodes: CategoryTreeNode[], id: string): CategoryTreeNode | nul
   return null;
 }
 
-export default async function CategoryPage({ params }: Props) {
+export default async function CategoryPage({ params, searchParams }: Props) {
   const { slug } = await params;
-  const [category, tree, plans] = await Promise.all([
-    serverApiOrNull<CategoryDetail>(`categories/${encodeURIComponent(slug)}`),
-    serverApiOrNull<CategoryTree>('categories/tree'),
-    loadCreditPlans(),
+  const listing = parseListingParams(await searchParams, slug.toLowerCase());
+  const [category, tree, plans, results] = await Promise.all([
+    loadCategory(slug),
+    loadCategoryTree(REVALIDATE.category),
+    loadCreditPlans(REVALIDATE.category),
+    loadProducts(toProductQuery(listing), REVALIDATE.category),
   ]);
   if (!category) {
     notFound();
   }
+  const origin = resolveSiteOrigin();
+  const jsonLd = serializeJsonLd(categoryBreadcrumbJsonLd(category, origin, PLATFORM_NAME));
   // Sidebar tree: the root this category belongs to, so siblings and children are one click away.
   const rootId = category.breadcrumbs[0]?.id ?? category.id;
-  const root = tree ? findNode(tree.items, rootId) : null;
+  const root = tree.ok ? findNode(tree.data.items, rootId) : null;
 
   return (
     <>
+      {/* Schema.org BreadcrumbList; serializeJsonLd escapes `<` so the payload cannot close the script tag. */}
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd }} />
       <nav aria-label="مسیر" className="mb-3 flex flex-wrap items-center gap-1 text-xs text-slate-500">
         <Link href="/" className="hover:text-brand-700">
           {PLATFORM_NAME}
@@ -78,7 +98,7 @@ export default async function CategoryPage({ params }: Props) {
         ) : null}
       </div>
       <Suspense fallback={<SkeletonCards />}>
-        <ProductBrowser fixedCategorySlug={category.slug} tree={root ? [root] : []} bnplEnabled={isBnplEnabled(plans)} />
+        <ProductBrowser fixedCategorySlug={category.slug} tree={root ? [root] : []} bnplEnabled={isBnplEnabled(plans)} results={results} />
       </Suspense>
     </>
   );

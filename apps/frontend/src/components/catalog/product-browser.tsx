@@ -3,66 +3,50 @@
 import { Filter, PackageSearch, Search, X } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useTransition } from 'react';
 
 import { Pagination } from '@/components/ui/misc';
-import { EmptyState, ErrorState, SkeletonCards } from '@/components/ui/states';
-import type { CategoryTreeNode, ColorOption, Page, ProductListItem, ProductSort } from '@/lib/api/types';
+import { EmptyState, ErrorState } from '@/components/ui/states';
+import type { CategoryTreeNode, ColorOption, Page, ProductListItem } from '@/lib/api/types';
 import { PRODUCT_SORTS } from '@/lib/api/types';
 import { formatToman } from '@/lib/currency';
 import { formatCount } from '@/lib/format';
 import { useApi, useDebounced } from '@/lib/hooks/use-api';
 import { SORT_LABELS } from '@/lib/labels';
 import { compareRials, toRialCents } from '@/lib/money';
+import { MAX_LISTING_PAGE, parseListingParams } from '@/lib/search-params';
 
 import { ProductGrid } from './product-card';
 
-const PAGE_SIZE = 24;
 /** Facets (colours, sizes, price ceiling) are derived from up to this many matching products. */
 const FACET_SAMPLE = 100;
+
+/** Server-rendered result page (or the error message when the API call failed). */
+export type ListingResults = { ok: true; data: Page<ProductListItem> } | { ok: false; message: string };
 
 interface ProductBrowserProps {
   /** Category page: the category is fixed by the route. */
   fixedCategorySlug?: string;
   tree: CategoryTreeNode[];
   bnplEnabled: boolean;
-}
-
-function splitList(value: string | null): string[] {
-  return value ? value.split(',').map((item) => item.trim()).filter(Boolean) : [];
-}
-
-function parseSort(value: string | null): ProductSort {
-  return (PRODUCT_SORTS as readonly string[]).includes(value ?? '') ? (value as ProductSort) : 'newest';
-}
-
-/** Whole Rials from a URL value, or undefined. */
-function parseRials(value: string | null): number | undefined {
-  if (!value || !/^\d+$/.test(value)) return undefined;
-  const number = Number(value);
-  return Number.isSafeInteger(number) ? number : undefined;
+  /** Results for the current URL, fetched by the server page (SSR). */
+  results: ListingResults;
 }
 
 /**
  * Search/category listing. Filters live in the URL (shareable, back-button
- * friendly) and every change queries GET /products live. The text box is
- * debounced (instant search) — no submit needed.
+ * friendly, crawlable); the result page itself is rendered on the server from
+ * those search params, so every filter change is a server navigation
+ * (`router.replace` inside a transition — the current results stay visible,
+ * dimmed, until the new page arrives). The text box is debounced.
  */
-export function ProductBrowser({ fixedCategorySlug, tree, bnplEnabled }: ProductBrowserProps) {
+export function ProductBrowser({ fixedCategorySlug, tree, bnplEnabled, results }: ProductBrowserProps) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
+  const [pending, startTransition] = useTransition();
 
-  const q = params.get('q') ?? '';
-  const sort = parseSort(params.get('sort'));
-  const categorySlug = fixedCategorySlug ?? params.get('category') ?? undefined;
-  const vendorSlug = params.get('vendor') ?? undefined;
-  const minPrice = parseRials(params.get('minPrice'));
-  const maxPrice = parseRials(params.get('maxPrice'));
-  const inStockOnly = params.get('inStock') === '1';
-  const colors = splitList(params.get('colors'));
-  const sizes = splitList(params.get('sizes'));
-  const page = Math.max(1, Number(params.get('page')) || 1);
+  const { q, sort, categorySlug, vendorSlug, minPrice, maxPrice, inStockOnly, onSaleOnly, colors, sizes } = parseListingParams(params, fixedCategorySlug);
 
   const [term, setTerm] = useState(q);
   const debouncedTerm = useDebounced(term.trim(), 350);
@@ -76,7 +60,7 @@ export function ProductBrowser({ fixedCategorySlug, tree, bnplEnabled }: Product
     }
     if (resetPage) next.delete('page');
     const text = next.toString();
-    router.replace(text ? `${pathname}?${text}` : pathname, { scroll: false });
+    startTransition(() => router.replace(text ? `${pathname}?${text}` : pathname, { scroll: false }));
   }
 
   // Instant search: push the debounced term into the URL.
@@ -86,20 +70,6 @@ export function ProductBrowser({ fixedCategorySlug, tree, bnplEnabled }: Product
   }, [debouncedTerm]);
   // Keep the box in sync when the URL changes from elsewhere (header search, back button).
   useEffect(() => setTerm(q), [q]);
-
-  const results = useApi<Page<ProductListItem>>('/products', {
-    search: q || undefined,
-    categorySlug,
-    vendorSlug,
-    minPrice,
-    maxPrice,
-    inStockOnly: inStockOnly || undefined,
-    colors,
-    sizes,
-    sortBy: sort,
-    page,
-    pageSize: PAGE_SIZE,
-  });
 
   // Facet sample: same text/category scope, without the facet filters themselves.
   const facetSample = useApi<Page<ProductListItem>>('/products', { search: q || undefined, categorySlug, vendorSlug, pageSize: FACET_SAMPLE, sortBy: 'price_desc' });
@@ -115,7 +85,7 @@ export function ProductBrowser({ fixedCategorySlug, tree, bnplEnabled }: Product
     return { colors: [...colorMap.values()], sizes: [...sizeSet], ceiling: Number(toRialCents(ceiling) / 100n) };
   }, [facetSample.data]);
 
-  const activeFilterCount = (minPrice !== undefined || maxPrice !== undefined ? 1 : 0) + (inStockOnly ? 1 : 0) + colors.length + sizes.length + (!fixedCategorySlug && categorySlug ? 1 : 0);
+  const activeFilterCount = (minPrice !== undefined || maxPrice !== undefined ? 1 : 0) + (inStockOnly ? 1 : 0) + (onSaleOnly ? 1 : 0) + colors.length + sizes.length + (!fixedCategorySlug && categorySlug ? 1 : 0);
 
   const toggleInList = (list: string[], value: string) => (list.includes(value) ? list.filter((item) => item !== value) : [...list, value]).join(',') || null;
 
@@ -174,6 +144,21 @@ export function ProductBrowser({ fixedCategorySlug, tree, bnplEnabled }: Product
         </label>
       </FilterSection>
 
+      <FilterSection title="تخفیف">
+        <label className="flex cursor-pointer items-center justify-between gap-3 text-sm text-slate-700">
+          فقط کالاهای تخفیف‌دار
+          <button
+            type="button"
+            role="switch"
+            aria-checked={onSaleOnly}
+            onClick={() => update({ onSale: onSaleOnly ? null : '1' })}
+            className={`relative h-6 w-11 rounded-full transition ${onSaleOnly ? 'bg-brand-600' : 'bg-slate-300'}`}
+          >
+            <span className={`absolute top-0.5 size-5 rounded-full bg-white shadow transition-all ${onSaleOnly ? 'start-[1.375rem]' : 'start-0.5'}`} />
+          </button>
+        </label>
+      </FilterSection>
+
       {facets.colors.length > 0 ? (
         <FilterSection title="رنگ">
           <div className="flex flex-wrap gap-2">
@@ -220,7 +205,7 @@ export function ProductBrowser({ fixedCategorySlug, tree, bnplEnabled }: Product
       {activeFilterCount > 0 ? (
         <button
           type="button"
-          onClick={() => update({ minPrice: null, maxPrice: null, inStock: null, colors: null, sizes: null, ...(fixedCategorySlug ? {} : { category: null }) })}
+          onClick={() => update({ minPrice: null, maxPrice: null, inStock: null, onSale: null, colors: null, sizes: null, ...(fixedCategorySlug ? {} : { category: null }) })}
           className="inline-flex items-center justify-center gap-1 rounded-xl border border-slate-300 py-2 text-sm text-slate-700 hover:bg-slate-50"
         >
           <X className="size-4" /> حذف همهٔ فیلترها
@@ -263,35 +248,41 @@ export function ProductBrowser({ fixedCategorySlug, tree, bnplEnabled }: Product
 
         {vendorSlug ? (
           <p className="mb-3 inline-flex items-center gap-2 rounded-full bg-brand-50 px-3 py-1 text-xs text-brand-800">
-            فقط محصولات فروشگاه «{results.data?.items[0]?.vendor.storeName ?? vendorSlug}»
+            فقط محصولات فروشگاه «{(results.ok ? results.data.items[0]?.vendor.storeName : undefined) ?? vendorSlug}»
             <button type="button" onClick={() => update({ vendor: null })} aria-label="حذف فیلتر فروشگاه">
               <X className="size-3.5" />
             </button>
           </p>
         ) : null}
-        {results.data ? (
-          <p className="mb-3 text-xs text-slate-500" aria-live="polite">
+        {results.ok ? (
+          <p className="mb-3 text-xs text-slate-500" aria-live="polite" data-testid="listing-total">
             {formatCount(results.data.total)} محصول{q ? ` برای «${q}»` : ''}
-            {results.refreshing || results.loading ? ' — در حال به‌روزرسانی…' : ''}
+            {pending ? ' — در حال به‌روزرسانی…' : ''}
           </p>
         ) : null}
 
-        {results.loading && results.data === undefined ? (
-          <SkeletonCards count={8} />
-        ) : results.error && results.data === undefined ? (
-          <ErrorState error={results.error} onRetry={() => void results.reload()} />
-        ) : results.data && results.data.items.length === 0 ? (
+        {!results.ok ? (
+          <ErrorState error={results.message} onRetry={() => startTransition(() => router.refresh())} />
+        ) : results.data.items.length === 0 ? (
           <EmptyState
             icon={<PackageSearch className="size-6" />}
             title="محصولی با این مشخصات پیدا نشد"
             description="عبارت دیگری را امتحان کنید یا برخی فیلترها را بردارید."
           />
-        ) : results.data ? (
-          <div className={results.loading ? 'opacity-60 transition-opacity' : ''}>
+        ) : (
+          <div className={pending ? 'opacity-60 transition-opacity' : ''} aria-busy={pending}>
             <ProductGrid products={results.data.items} bnplEnabled={bnplEnabled} />
-            <Pagination page={results.data.page} totalPages={results.data.totalPages} total={results.data.total} onChange={(next) => update({ page: String(next) }, false)} />
+            <Pagination
+              page={results.data.page}
+              totalPages={Math.min(results.data.totalPages, MAX_LISTING_PAGE)}
+              total={results.data.total}
+              onChange={(next) => {
+                update({ page: String(next) }, false);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+            />
           </div>
-        ) : null}
+        )}
       </div>
 
       {filtersOpen ? (

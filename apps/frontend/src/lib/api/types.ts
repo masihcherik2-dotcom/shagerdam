@@ -254,6 +254,8 @@ export interface ProductQuery {
   minPrice?: number;
   maxPrice?: number;
   inStockOnly?: boolean;
+  /** Only products with a discounted variant (compareAtPrice > price). */
+  onSaleOnly?: boolean;
   colors?: string[];
   sizes?: string[];
   sortBy?: ProductSort;
@@ -998,6 +1000,26 @@ export interface MediaAssetSummary {
   createdAt: string;
 }
 
+/** POST /admin/vendors — store opened by staff (APPROVED immediately). */
+export interface AdminCreateVendorInput {
+  storeName: string;
+  storeSlug: string;
+  ownerMobile: string;
+  ownerFullName: string;
+  bankIban: string;
+  bankAccountHolder?: string;
+  commissionRateOverride?: number | null;
+  instagramHandle?: string;
+  bio?: string;
+}
+
+export interface AdminCreateVendorResult {
+  profile: VendorProfile;
+  /** A new customer account was created for the owner mobile (otherwise an existing account was promoted). */
+  ownerCreated: boolean;
+  auditLogId: string;
+}
+
 export interface VendorProfile {
   id: string;
   userId: string;
@@ -1187,6 +1209,8 @@ export interface SiteInfo {
   enamadImageUrl: string | null;
   samandehiLinkUrl: string | null;
   samandehiImageUrl: string | null;
+  /** Google Search Console verification token (content of the google-site-verification meta tag). */
+  googleVerificationTag: string | null;
 }
 
 export type SiteInfoField = keyof SiteInfo;

@@ -190,6 +190,28 @@ const CATEGORY_TREE: readonly CategorySeed[] = [
       { slug: 'books', titleFa: 'کتاب', titleEn: 'Books', defaultCommissionRate: '10.00', sortOrder: 10 },
     ],
   },
+  {
+    slug: 'sport-travel',
+    titleFa: 'ورزش و سفر',
+    titleEn: 'Sport & Travel',
+    defaultCommissionRate: '12.00',
+    sortOrder: 70,
+    children: [
+      { slug: 'fitness-equipment', titleFa: 'لوازم ورزشی و تناسب اندام', titleEn: 'Fitness Equipment', defaultCommissionRate: '12.00', sortOrder: 10 },
+      { slug: 'camping-travel', titleFa: 'کوهنوردی، کمپینگ و سفر', titleEn: 'Camping & Travel', defaultCommissionRate: '12.00', sortOrder: 20 },
+    ],
+  },
+  {
+    slug: 'tools-auto',
+    titleFa: 'ابزار و خودرو',
+    titleEn: 'Tools & Automotive',
+    defaultCommissionRate: '9.00',
+    sortOrder: 80,
+    children: [
+      { slug: 'power-tools', titleFa: 'ابزار برقی و دستی', titleEn: 'Power & Hand Tools', defaultCommissionRate: '9.00', sortOrder: 10 },
+      { slug: 'car-accessories', titleFa: 'لوازم جانبی خودرو', titleEn: 'Car Accessories', defaultCommissionRate: '10.00', sortOrder: 20 },
+    ],
+  },
 ];
 
 interface VariantSeed {
@@ -403,7 +425,7 @@ export function resolveSeedProfile(env: NodeJS.ProcessEnv = process.env): SeedPr
   if (raw === 'development' || raw === 'production') {
     return raw;
   }
-  throw new Error(`SEED_PROFILE must be "development" or "production" (got "${raw}").`);
+  throw new Error(`SEED_PROFILE must be "development", "production" or "demo" (got "${raw}").`);
 }
 
 /** Iranian mobile in E.164 (+989XXXXXXXXX); accepts 09XXXXXXXXX as well. */
@@ -774,10 +796,20 @@ export async function seedDatabase(prisma: PrismaClientInstance, profile: SeedPr
   return { profile, users, categories, vendor, credit, configs };
 }
 
+/**
+ * `SEED_PROFILE=demo`: the base seed of the environment (production under
+ * NODE_ENV=production, else development) followed by the demo catalogue
+ * (`prisma/demo/demo-catalog.ts` — hidden in production, live elsewhere).
+ */
+export function isDemoRequest(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env.SEED_PROFILE ?? '').trim().toLowerCase() === 'demo';
+}
+
 async function main(): Promise<void> {
   const prisma = new PrismaClient();
+  const demo = isDemoRequest();
   try {
-    const summary = await seedDatabase(prisma);
+    const summary = await seedDatabase(prisma, demo ? resolveSeedProfile({ ...process.env, SEED_PROFILE: '' }) : resolveSeedProfile());
     console.warn(
       `[seed] master data ready (profile: ${summary.profile})\n` +
         `  users          : ${summary.users.created.length} created (${summary.users.created.join(', ') || '—'}), ${summary.users.updated} updated\n` +
@@ -790,6 +822,15 @@ async function main(): Promise<void> {
     );
   } finally {
     await prisma.$disconnect();
+  }
+  if (demo) {
+    // Loaded lazily: it boots the Nest application context (media storage, services).
+    const { loadDemoCatalog } = await import('./demo/demo-catalog');
+    const result = await loadDemoCatalog();
+    console.warn(
+      `[seed] demo catalogue (${result.visibility}): stores ${result.storesCreated} created / ${result.storesExisting} existing, ` +
+        `products ${result.productsCreated} created / ${result.productsExisting} existing, ${result.images} images stored`,
+    );
   }
 }
 

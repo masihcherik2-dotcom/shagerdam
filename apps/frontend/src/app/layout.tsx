@@ -6,6 +6,8 @@ import { SessionProvider } from '@/components/providers/session-provider';
 import { ToastProvider } from '@/components/providers/toast-provider';
 import { loadBranding } from '@/lib/api/branding.server';
 import { getServerSession } from '@/lib/api/server';
+import { loadSiteInfo } from '@/lib/api/site-info.server';
+import { GOOGLE_SITE_VERIFICATION } from '@/lib/brand';
 import { resolveSiteOrigin } from '@/lib/env';
 
 import { vazirmatn } from './fonts';
@@ -15,7 +17,7 @@ import { PLATFORM_NAME, PLATFORM_TAGLINE, PLATFORM_TITLE } from '@/lib/brand';
 export async function generateMetadata(): Promise<Metadata> {
   // Favicon / home-screen icon from the admin-managed branding; without one the
   // browser default applies (no broken icon link is emitted).
-  const branding = await loadBranding();
+  const [branding, siteInfo] = await Promise.all([loadBranding(), loadSiteInfo()]);
   const appleIcon = branding.mobileLogoUrl ?? branding.faviconUrl;
   const description = `${PLATFORM_NAME}، ${PLATFORM_TAGLINE} — خرید نقدی یا اقساطی (BNPL) از فروشگاه‌های تأییدشده.`;
   return {
@@ -39,6 +41,10 @@ export async function generateMetadata(): Promise<Metadata> {
       description,
     },
     formatDetection: { telephone: false },
+    // Google Search Console ownership tag, managed in /admin/site-info (token validated by the API).
+    // google-site-verification: the value saved in /admin/site-info wins (changeable without a deploy);
+    // otherwise the site's own Search Console token, so verification never depends on the database.
+    verification: { google: siteInfo.googleVerificationTag ?? GOOGLE_SITE_VERIFICATION },
     ...(branding.faviconUrl || appleIcon
       ? {
           icons: {

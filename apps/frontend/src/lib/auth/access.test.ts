@@ -23,6 +23,10 @@ describe('route access', () => {
     expect(canAccess('/vendor/dashboard', 'CUSTOMER')).toBe(false);
     expect(canAccess('/vendor/register', 'CUSTOMER')).toBe(true);
     expect(canAccess('/admin/vendors', 'SUPPORT')).toBe(true);
+    expect(canAccess('/admin/vendors/create', 'SUPPORT')).toBe(false);
+    expect(canAccess('/admin/vendors/create', 'ADMIN')).toBe(true);
+    expect(canAccess('/vendor/landing', null)).toBe(true);
+    expect(canAccess('/vendor/landingx', null)).toBe(false);
     expect(canAccess('/admin/settlements', 'SUPPORT')).toBe(false);
     expect(canAccess('/admin/branding', 'ADMIN')).toBe(true);
     expect(canAccess('/admin/branding', 'SUPER_ADMIN')).toBe(true);

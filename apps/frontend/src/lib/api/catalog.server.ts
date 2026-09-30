@@ -1,4 +1,4 @@
-import { serverApi } from './server';
+import { publicApi, REVALIDATE } from './public.server';
 import type { CategoryTree, CreditPlans, Page, ProductListItem, ProductQuery } from './types';
 
 export type Loaded<T> = { ok: true; data: T } | { ok: false; message: string };
@@ -11,17 +11,18 @@ async function load<T>(promise: Promise<T>): Promise<Loaded<T>> {
   }
 }
 
-export function loadProducts(query: ProductQuery): Promise<Loaded<Page<ProductListItem>>> {
-  return load(serverApi<Page<ProductListItem>>('products', { query: { ...query } }));
+/** Public product listing, cached in the Data Cache for `revalidate` seconds (default: home window). */
+export function loadProducts(query: ProductQuery, revalidate: number = REVALIDATE.home): Promise<Loaded<Page<ProductListItem>>> {
+  return load(publicApi<Page<ProductListItem>>('products', { query: { ...query }, revalidate, tags: ['catalog'] }));
 }
 
-export function loadCategoryTree(): Promise<Loaded<CategoryTree>> {
-  return load(serverApi<CategoryTree>('categories/tree'));
+export function loadCategoryTree(revalidate: number = REVALIDATE.home): Promise<Loaded<CategoryTree>> {
+  return load(publicApi<CategoryTree>('categories/tree', { revalidate, tags: ['catalog'] }));
 }
 
 /** Installment plans of the active credit provider (public). */
-export function loadCreditPlans(): Promise<Loaded<CreditPlans>> {
-  return load(serverApi<CreditPlans>('credit/plans'));
+export function loadCreditPlans(revalidate: number = REVALIDATE.home): Promise<Loaded<CreditPlans>> {
+  return load(publicApi<CreditPlans>('credit/plans', { revalidate, tags: ['credit'] }));
 }
 
 /** BNPL badges are shown only when the credit programme is live and has plans. */

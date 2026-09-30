@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
 import { CategoriesModule } from '../categories/categories.module';
 import { MediaModule } from '../media/media.module';
+import { ProductsModule } from '../products/products.module';
+import { VendorsModule } from '../vendors/vendors.module';
+import { AdminVendorCatalogController } from './admin-vendor-catalog.controller';
 import { DIGIKALA_API_ORIGIN, DIGIKALA_PUBLIC_API_ORIGIN, DigikalaExtractor } from './extractors/digikala.extractor';
 import { GenericSchemaOrgExtractor } from './extractors/generic-schema.extractor';
 import { IMPORT_NETWORK_POLICY, PUBLIC_INTERNET_POLICY } from './net/address-policy';
@@ -19,8 +22,8 @@ import { VendorProductImportController } from './vendor-product-import.controlle
  * fixtures from a local server.
  */
 @Module({
-  imports: [MediaModule, CategoriesModule],
-  controllers: [VendorProductImportController],
+  imports: [MediaModule, CategoriesModule, ProductsModule, VendorsModule],
+  controllers: [VendorProductImportController, AdminVendorCatalogController],
   providers: [
     { provide: IMPORT_NETWORK_POLICY, useValue: PUBLIC_INTERNET_POLICY },
     { provide: DIGIKALA_API_ORIGIN, useValue: DIGIKALA_PUBLIC_API_ORIGIN },

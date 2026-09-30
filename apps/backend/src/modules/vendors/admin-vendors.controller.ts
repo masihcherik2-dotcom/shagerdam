@@ -3,6 +3,7 @@ import {
   ApiBadRequestResponse,
   ApiBearerAuth,
   ApiConflictResponse,
+  ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
@@ -16,12 +17,15 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user';
 import type { RequestContext } from '../../common/types/request-context';
 import { SkipAudit } from '../audit/audit.decorator';
+import { AdminCreateVendorDto } from './dto/admin-create-vendor.dto';
 import { VerifyVendorDto } from './dto/verify-vendor.dto';
 import { VendorQueryDto } from './dto/vendor-query.dto';
 import {
+  AdminCreateVendorResponseDto,
   PaginatedVendorsDto,
   VendorAdminDetailDto,
   VendorAdminSummaryDto,
+  VendorProfileDto,
   VerifyVendorResponseDto,
 } from './dto/vendor-response.dto';
 import { VendorsService } from './vendors.service';
@@ -68,6 +72,46 @@ export class AdminVendorsController {
       total,
       totalPages: Math.max(1, Math.ceil(total / query.pageSize)),
     };
+  }
+
+  /**
+   * `@SkipAudit()`: the service writes the audit row inside the creation
+   * transaction (store, owner, wallet and audit commit together).
+   */
+  @Post()
+  @HttpCode(HttpStatus.CREATED)
+  @SkipAudit()
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @ApiOperation({
+    summary: 'ایجاد فروشگاه توسط مدیر (تأییدشده)',
+    description:
+      'حساب مالک با شمارهٔ موبایل پیدا یا ساخته می‌شود و نقش VENDOR می‌گیرد؛ فروشگاه، کیف پول و ردیف audit در یک تراکنش ثبت می‌شوند. ' +
+      'فروشگاه بلافاصله APPROVED است و مسئولیت احراز هویت با مدیر ایجادکننده است (kycBy=ADMIN_CREATED). ' +
+      'فروشنده با همان موبایل و کد یک‌بارمصرف از /login وارد می‌شود.',
+  })
+  @ApiCreatedResponse({ type: AdminCreateVendorResponseDto })
+  @ApiBadRequestResponse({ description: 'ورودی نامعتبر (شبا، موبایل، شناسه) یا شناسهٔ رزروشده' })
+  @ApiConflictResponse({ description: 'شناسه تکراری، موبایل متعلق به کارکنان/فروشگاه دیگر یا حساب غیرفعال' })
+  @ApiForbiddenResponse({ description: 'فقط SUPER_ADMIN و ADMIN' })
+  async create(
+    @Body() dto: AdminCreateVendorDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @ClientContext() context: RequestContext,
+  ): Promise<AdminCreateVendorResponseDto> {
+    const result = await this.vendors.createByAdmin({
+      actorId: user.id,
+      context,
+      storeName: dto.storeName,
+      storeSlug: dto.storeSlug,
+      ownerMobile: dto.ownerMobile,
+      ownerFullName: dto.ownerFullName,
+      bankIban: dto.bankIban,
+      ...(dto.bankAccountHolder !== undefined ? { bankAccountHolder: dto.bankAccountHolder } : {}),
+      commissionRateOverride: dto.commissionRateOverride ?? null,
+      ...(dto.instagramHandle !== undefined ? { instagramHandle: dto.instagramHandle } : {}),
+      ...(dto.bio !== undefined ? { bio: dto.bio } : {}),
+    });
+    return { profile: VendorProfileDto.from(result.profile), ownerCreated: result.ownerCreated, auditLogId: result.auditLogId };
   }
 
   @Get(':id')

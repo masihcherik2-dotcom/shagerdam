@@ -69,4 +69,12 @@ describe('site info rules', () => {
     expect(changedFields(EMPTY_SITE_INFO, { ...EMPTY_SITE_INFO, legalName: 'x', postalCode: '1234567890' })).toEqual(['legalName', 'postalCode']);
     expect(changedFields(EMPTY_SITE_INFO, EMPTY_SITE_INFO)).toEqual([]);
   });
+  it('stores only the Google verification token, from the bare token or the whole meta tag', () => {
+    const token = 'abcDEF_123-xyz456789012345678901234567890123';
+    expect(normalizeField('googleVerificationTag', token)).toBe(token);
+    expect(normalizeField('googleVerificationTag', `<meta name="google-site-verification" content="${token}" />`)).toBe(token);
+    expect(fieldProblem('googleVerificationTag', token)).toBeNull();
+    expect(fieldProblem('googleVerificationTag', '"><script>')).not.toBeNull();
+    expect(fieldProblem('googleVerificationTag', 'short')).not.toBeNull();
+  });
 });

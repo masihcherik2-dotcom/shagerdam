@@ -21,7 +21,25 @@ export interface ImportResult {
   failures: FailedImage[];
 }
 
+/** API routes of the two import steps (vendor routes by default; staff use the per-store admin routes). */
+export interface ImportEndpoints {
+  extract: string;
+  ingest: string;
+}
+
+export const VENDOR_IMPORT_ENDPOINTS: ImportEndpoints = {
+  extract: '/vendor/products/import/extract-spec',
+  ingest: '/vendor/products/import/ingest-images',
+};
+
+/** Staff importing on behalf of a store: images land in the store owner's library. */
+export function adminImportEndpoints(vendorId: string): ImportEndpoints {
+  const base = `/admin/vendors/${encodeURIComponent(vendorId)}/products/import`;
+  return { extract: `${base}/extract-spec`, ingest: `${base}/ingest-images` };
+}
+
 interface ProductImportPanelProps {
+  endpoints?: ImportEndpoints;
   /** Free gallery slots (the product limit minus images already in the form). */
   imageSlots: number;
   /** The form already has content that applying the draft would overwrite. */
@@ -45,7 +63,7 @@ const fileName = (url: string): string => {
  * the chosen images are copied into our media storage (ingest-images) and the
  * form is filled. The vendor then only adds price, stock and variants.
  */
-export function ProductImportPanel({ imageSlots, hasExistingData, onApply }: ProductImportPanelProps) {
+export function ProductImportPanel({ endpoints = VENDOR_IMPORT_ENDPOINTS, imageSlots, hasExistingData, onApply }: ProductImportPanelProps) {
   const [url, setUrl] = useState('');
   const [urlError, setUrlError] = useState<string | null>(null);
   const [draft, setDraft] = useState<ImportedProductDraft | null>(null);
@@ -55,7 +73,7 @@ export function ProductImportPanel({ imageSlots, hasExistingData, onApply }: Pro
   const [applyError, setApplyError] = useState<string | null>(null);
 
   const extract = useMutation((link: string) =>
-    apiPost<ImportedProductDraft>('/vendor/products/import/extract-spec', { url: link }, { timeout: IMPORT_EXTRACT_TIMEOUT_MS }),
+    apiPost<ImportedProductDraft>(endpoints.extract, { url: link }, { timeout: IMPORT_EXTRACT_TIMEOUT_MS }),
   );
 
   async function fetchDraft(event: FormEvent) {
@@ -93,7 +111,7 @@ export function ProductImportPanel({ imageSlots, hasExistingData, onApply }: Pro
       let images: UploadedFile[] = [];
       let failures: FailedImage[] = [];
       if (imageUrls.length > 0) {
-        const ingested = await apiPost<IngestImagesResponse>('/vendor/products/import/ingest-images', { imageUrls }, { timeout: IMPORT_IMAGES_TIMEOUT_MS });
+        const ingested = await apiPost<IngestImagesResponse>(endpoints.ingest, { imageUrls }, { timeout: IMPORT_IMAGES_TIMEOUT_MS });
         images = ingested.items.map((item) => ingestedToUploaded(item));
         failures = ingested.failures;
       }

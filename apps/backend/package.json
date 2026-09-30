@@ -18,6 +18,8 @@
     "db:deploy": "dotenv -e ../../.env -- prisma migrate deploy",
     "db:push": "dotenv -e ../../.env -- prisma db push",
     "db:seed": "dotenv -e ../../.env -- ts-node --project tsconfig.json prisma/seed.ts",
+    "db:seed:demo": "dotenv -e ../../.env -v SEED_PROFILE=demo -- ts-node --project tsconfig.json prisma/seed.ts",
+    "demo:sample-order": "dotenv -e ../../.env -- ts-node --project tsconfig.json prisma/demo/sample-order.ts",
     "db:reset": "dotenv -e ../../.env -- prisma migrate reset --force --skip-generate",
     "db:studio": "dotenv -e ../../.env -- prisma studio",
     "verify:connections": "dotenv -e ../../.env -- ts-node --project tsconfig.json scripts/verify-connections.ts",

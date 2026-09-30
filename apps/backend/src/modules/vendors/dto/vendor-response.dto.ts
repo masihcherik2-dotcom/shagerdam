@@ -413,3 +413,14 @@ export class VerifyVendorResponseDto {
     };
   }
 }
+
+export class AdminCreateVendorResponseDto {
+  @ApiProperty({ type: VendorProfileDto })
+  profile!: VendorProfileDto;
+
+  @ApiProperty({ description: 'true when a new user account was created for the owner mobile; false when an existing customer account was promoted' })
+  ownerCreated!: boolean;
+
+  @ApiProperty({ format: 'uuid' })
+  auditLogId!: string;
+}

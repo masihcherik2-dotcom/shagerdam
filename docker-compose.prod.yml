@@ -228,10 +228,16 @@ services:
       - no-new-privileges:true
     cap_drop: [ALL]
     logging: *logging
+    # uploads: the demo seed (SEED_PROFILE=demo) stores product images through the
+    # configured storage provider — with STORAGE_PROVIDER=local they must land in the
+    # same volume the backend serves. "app" gives outbound access for S3 storage
+    # ("data" is internal-only).
+    volumes:
+      - uploads:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
-    networks: [data]
+    networks: [app, data]
 
   # ── One-off: Let's Encrypt (profile "ops") ───────────────────────────────
   #   docker compose ... run --rm certbot certonly --webroot -w /var/www/certbot -d example.ir ...

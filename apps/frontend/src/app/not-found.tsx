@@ -5,7 +5,7 @@ import { LinkButton } from '@/components/ui/button';
 import { PLATFORM_NAME } from '@/lib/brand';
 
 export const metadata: Metadata = {
-  title: 'صفحه پیدا نشد (۴۰۴)',
+  title: 'صفحه پیدا نشد',
   description: `صفحهٔ درخواستی در ${PLATFORM_NAME} پیدا نشد. از جست‌وجو یا صفحهٔ اصلی استفاده کنید.`,
   robots: { index: false, follow: true },
 };

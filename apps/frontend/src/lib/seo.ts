@@ -2,7 +2,7 @@
  * Pure SEO helpers: Schema.org JSON-LD for product pages, sitemap entries and
  * safe serialisation. Unit-tested in `seo.test.ts`.
  */
-import type { CategoryTreeNode, ProductDetail } from './api/types';
+import type { CategoryDetail, CategoryTreeNode, ProductDetail } from './api/types';
 
 type JsonLd = Record<string, unknown>;
 
@@ -97,6 +97,77 @@ export function productBreadcrumbJsonLd(product: ProductDetail, origin: string, 
   };
 }
 
+/** Home → ancestors → category (category pages). */
+export function categoryBreadcrumbJsonLd(category: Pick<CategoryDetail, 'breadcrumbs'>, origin: string, homeName: string): JsonLd {
+  const items = [
+    { name: homeName, item: `${origin}/` },
+    ...category.breadcrumbs.map((crumb) => ({ name: crumb.titleFa, item: `${origin}/categories/${encodeURIComponent(crumb.slug)}` })),
+  ];
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: items.map((entry, index) => ({ '@type': 'ListItem', position: index + 1, name: entry.name, item: entry.item })),
+  };
+}
+
+/**
+ * Organization (home page). Only facts the platform actually has: name, URL,
+ * the admin-managed logo and the contact details from /admin/site-info —
+ * absent values are omitted, never invented.
+ */
+export function organizationJsonLd(params: {
+  origin: string;
+  name: string;
+  legalName?: string | null;
+  logoUrl?: string | null;
+  supportPhone?: string | null;
+  supportEmail?: string | null;
+}): JsonLd {
+  const contact =
+    params.supportPhone || params.supportEmail
+      ? {
+          contactPoint: [
+            {
+              '@type': 'ContactPoint',
+              contactType: 'customer support',
+              areaServed: 'IR',
+              availableLanguage: ['fa'],
+              ...(params.supportPhone ? { telephone: params.supportPhone } : {}),
+              ...(params.supportEmail ? { email: params.supportEmail } : {}),
+            },
+          ],
+        }
+      : {};
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'Organization',
+    '@id': `${params.origin}/#organization`,
+    name: params.name,
+    url: `${params.origin}/`,
+    ...(params.legalName ? { legalName: params.legalName } : {}),
+    ...(params.logoUrl ? { logo: absoluteUrl(params.origin, params.logoUrl) } : {}),
+    ...contact,
+  };
+}
+
+/** WebSite with a SearchAction pointing at the real search page (`/search?q=`). */
+export function websiteJsonLd(origin: string, name: string): JsonLd {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'WebSite',
+    '@id': `${origin}/#website`,
+    name,
+    url: `${origin}/`,
+    inLanguage: 'fa-IR',
+    publisher: { '@id': `${origin}/#organization` },
+    potentialAction: {
+      '@type': 'SearchAction',
+      target: { '@type': 'EntryPoint', urlTemplate: `${origin}/search?q={search_term_string}` },
+      'query-input': 'required name=search_term_string',
+    },
+  };
+}
+
 /**
  * JSON for a `<script type="application/ld+json">`: `<`, `>` and `&` are
  * escaped so a product title such as `</script><script>…` can never close the
@@ -128,7 +199,11 @@ export const STATIC_SITEMAP_PATHS: ReadonlyArray<{ path: string; changeFrequency
   { path: '/terms', changeFrequency: 'yearly', priority: 0.3 },
   { path: '/privacy', changeFrequency: 'yearly', priority: 0.3 },
   { path: '/returns', changeFrequency: 'yearly', priority: 0.3 },
+  { path: '/vendor/landing', changeFrequency: 'monthly', priority: 0.6 },
 ];
+
+/** Public pages inside disallowed areas (robots `Allow`, more specific than the Disallow). */
+export const ROBOTS_ALLOW: readonly string[] = ['/', '/vendor/landing'];
 
 /** Areas crawlers must not index (session-bound or API). */
 export const ROBOTS_DISALLOW: readonly string[] = ['/admin/', '/customer/', '/vendor/', '/checkout/', '/checkout', '/cart', '/login', '/payment/', '/forbidden', '/api/'];

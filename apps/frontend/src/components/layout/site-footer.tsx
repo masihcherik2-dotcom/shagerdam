@@ -1,4 +1,4 @@
-import { BadgeCheck, Building2, Headphones, Mail, MapPin, Phone, RotateCcw, ShieldCheck } from 'lucide-react';
+import { BadgeCheck, Building2, Headphones, Hourglass, Mail, MapPin, Phone, RotateCcw, ShieldCheck } from 'lucide-react';
 import Link from 'next/link';
 
 import { loadBranding } from '@/lib/api/branding.server';
@@ -58,7 +58,7 @@ function TrustSeals({ info }: { info: SiteInfo }) {
     info.enamadLinkUrl && info.enamadImageUrl ? { key: 'enamad', href: info.enamadLinkUrl, src: info.enamadImageUrl, alt: 'نماد اعتماد الکترونیکی (اینماد)' } : null,
     info.samandehiLinkUrl && info.samandehiImageUrl ? { key: 'samandehi', href: info.samandehiLinkUrl, src: info.samandehiImageUrl, alt: 'نشان ملی ثبت رسانه‌های دیجیتال (ساماندهی)' } : null,
   ].filter((seal) => seal !== null);
-  if (seals.length === 0) return null;
+  if (seals.length === 0) return <PendingSeals />;
   return (
     <div className="flex flex-col gap-2">
       <p className="font-bold text-slate-800">نمادهای اعتماد</p>
@@ -69,6 +69,28 @@ function TrustSeals({ info }: { info: SiteInfo }) {
             <img src={seal.src} alt={seal.alt} referrerPolicy="origin" width={88} height={88} loading="lazy" className="max-h-full max-w-full object-contain" />
           </a>
         ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Shown while no seal has been configured in /admin/site-info: states the
+ * process honestly instead of leaving an empty gap or showing a fake badge.
+ */
+function PendingSeals() {
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="font-bold text-slate-800">نمادهای اعتماد</p>
+      <div className="flex max-w-xs items-start gap-3 rounded-2xl border border-dashed border-amber-300 bg-amber-50 p-3 text-xs leading-6 text-amber-900" data-testid="trust-seals-pending" role="note">
+        <Hourglass className="mt-0.5 size-5 shrink-0 text-amber-600" aria-hidden="true" />
+        <div className="flex flex-col gap-1">
+          <p className="font-bold">در حال دریافت نمادهای رسمی تجارت الکترونیک</p>
+          <p>نماد اعتماد الکترونیکی (اینماد) و نشان ساماندهی پس از صدور، همین‌جا نمایش داده می‌شوند.</p>
+          <a href="https://enamad.ir/" target="_blank" rel="noopener noreferrer" className="inline-flex w-fit items-center gap-1 font-medium text-amber-800 underline underline-offset-4 hover:text-amber-950">
+            راهنمای نماد اعتماد الکترونیکی
+          </a>
+        </div>
       </div>
     </div>
   );

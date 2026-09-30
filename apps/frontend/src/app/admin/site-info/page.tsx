@@ -1,6 +1,6 @@
 'use client';
 
-import { BadgeCheck, Building2, ExternalLink, History, Phone, Save } from 'lucide-react';
+import { BadgeCheck, Building2, ExternalLink, History, Phone, Save, SearchCheck } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
 import { useToast } from '@/components/providers/toast-provider';
@@ -60,6 +60,21 @@ const GROUPS: ReadonlyArray<{ title: string; icon: typeof Building2; description
       { field: 'enamadImageUrl', maxLength: 500, ltr: true, placeholder: 'https://trustseal.enamad.ir/logo.aspx?id=…&Code=…' },
       { field: 'samandehiLinkUrl', maxLength: 500, ltr: true, placeholder: 'https://logo.samandehi.ir/Verify.aspx?id=…&p=…' },
       { field: 'samandehiImageUrl', maxLength: 500, ltr: true, placeholder: 'https://logo.samandehi.ir/logo.aspx?id=…&p=…' },
+    ],
+  },
+  {
+    title: 'موتورهای جست‌وجو',
+    icon: SearchCheck,
+    description:
+      'در Google Search Console روش تأیید «HTML tag» را انتخاب کنید و کل تگ meta یا فقط مقدار content آن را اینجا بچسبانید. پس از ذخیره، تگ در <head> همهٔ صفحات درج می‌شود و می‌توانید در Search Console دکمهٔ Verify را بزنید.',
+    fields: [
+      {
+        field: 'googleVerificationTag',
+        maxLength: 300,
+        ltr: true,
+        placeholder: '<meta name="google-site-verification" content="…" />',
+        hint: 'فقط مقدار content ذخیره می‌شود (حروف، رقم، - و _).',
+      },
     ],
   },
 ];

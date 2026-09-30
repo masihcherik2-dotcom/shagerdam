@@ -11,18 +11,21 @@ import { VariantPanel } from '@/components/catalog/variant-panel';
 import { Badge } from '@/components/ui/misc';
 import { loadCreditPlans } from '@/lib/api/catalog.server';
 import { PLATFORM_NAME } from '@/lib/brand';
-import { serverApiOrNull } from '@/lib/api/server';
+import { publicApiOrNull, REVALIDATE } from '@/lib/api/public.server';
 import type { ProductDetail } from '@/lib/api/types';
 import { resolveSiteOrigin } from '@/lib/env';
 import { formatDate } from '@/lib/format';
 import { absoluteUrl, productBreadcrumbJsonLd, productJsonLd, productMetaDescription, serializeJsonLd } from '@/lib/seo';
 
-export const dynamic = 'force-dynamic';
+/** ISR window of the product data (Data Cache); the HTML is rendered per request (session-aware header). */
+export const revalidate = 120;
 
 type Props = { params: Promise<{ slug: string }>; searchParams: Promise<{ variant?: string | string[] }> };
 
 /** One backend call per request, shared by generateMetadata and the page. */
-const loadProduct = cache((slug: string) => serverApiOrNull<ProductDetail>(`products/${encodeURIComponent(slug)}`));
+const loadProduct = cache((slug: string) =>
+  publicApiOrNull<ProductDetail>(`products/${encodeURIComponent(slug)}`, { revalidate: REVALIDATE.product, tags: ['catalog'] }),
+);
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
@@ -45,7 +48,7 @@ export default async function ProductPage({ params, searchParams }: Props) {
   const { slug } = await params;
   const { variant } = await searchParams;
   const initialSku = typeof variant === 'string' ? variant : null;
-  const [product, plans] = await Promise.all([loadProduct(slug), loadCreditPlans()]);
+  const [product, plans] = await Promise.all([loadProduct(slug), loadCreditPlans(REVALIDATE.product)]);
   if (!product) {
     notFound();
   }
