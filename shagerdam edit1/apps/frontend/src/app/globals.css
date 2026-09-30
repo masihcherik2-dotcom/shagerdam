@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+/*
+ * Shagerdam design tokens. Vazirmatn is self-hosted through next/font (see
+ * src/app/fonts.ts, exposed as --font-vazirmatn); the rest of the stack is the
+ * system fallback with full Arabic-script coverage.
+ */
+@theme {
+  --font-sans: var(--font-vazirmatn), "Vazirmatn", "IRANSansX", "IRANSans", "Segoe UI", Tahoma, system-ui, sans-serif;
+
+  --color-brand-50: #eff6ff;
+  --color-brand-100: #dbeafe;
+  --color-brand-400: #60a5fa;
+  --color-brand-500: #2563eb;
+  --color-brand-600: #1d4ed8;
+  --color-brand-700: #1e40af;
+  --color-brand-900: #172554;
+
+  --color-surface: #ffffff;
+  --color-surface-muted: #f8fafc;
+}
+
+html {
+  color-scheme: light;
+}
+
+body {
+  font-family: var(--font-sans);
+}
+
+/* Dual-thumb price slider: two range inputs stacked on one track. */
+.range-thumb {
+  pointer-events: none;
+  appearance: none;
+  background: transparent;
+}
+.range-thumb::-webkit-slider-thumb {
+  pointer-events: auto;
+  appearance: none;
+  height: 1.1rem;
+  width: 1.1rem;
+  border-radius: 9999px;
+  background: #fff;
+  border: 3px solid var(--color-brand-600);
+  cursor: pointer;
+}
+.range-thumb::-moz-range-thumb {
+  pointer-events: auto;
+  height: 1.1rem;
+  width: 1.1rem;
+  border-radius: 9999px;
+  background: #fff;
+  border: 3px solid var(--color-brand-600);
+  cursor: pointer;
+}

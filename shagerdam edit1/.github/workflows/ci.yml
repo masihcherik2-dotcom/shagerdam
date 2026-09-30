@@ -1,0 +1,201 @@
+# =============================================================================
+# Shopino CI — every pull request and every push to main
+#   quality      lint + typecheck (all workspaces), backend unit tests, frontend unit tests
+#   backend-e2e  PostgreSQL 16 + Redis 7 (docker-compose.yml), migrations, seed, e2e suites
+#   build        production build of every workspace (frontend: next build)
+#   docker       builds the four production images and boots nginx with its config
+#   infra-lint   shellcheck for deploy/backup scripts, compose validation
+# =============================================================================
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NODE_VERSION: "22"
+  TURBO_TELEMETRY_DISABLED: "1"
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  quality:
+    name: Lint, typecheck, unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Prepare CI environment
+        run: bash scripts/ci/prepare-env.sh
+      - name: Lint
+        run: pnpm lint
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Backend unit tests
+        run: pnpm --filter @shopino/backend test
+      - name: Frontend unit tests
+        run: pnpm --filter @shopino/frontend test
+
+  backend-e2e:
+    name: Backend e2e (PostgreSQL + Redis)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Prepare CI environment
+        run: bash scripts/ci/prepare-env.sh
+      - name: Start PostgreSQL 16 and Redis 7
+        # The base compose file only (not the dev override): same images,
+        # authentication and settings as every other environment.
+        run: docker compose -f docker-compose.yml up -d --wait
+      - name: Generate Prisma client
+        run: pnpm --filter @shopino/backend db:generate
+      - name: Apply migrations
+        run: pnpm --filter @shopino/backend db:deploy
+      - name: Seed master data (development profile)
+        run: pnpm --filter @shopino/backend db:seed
+      - name: Verify seed
+        run: pnpm verify:seed
+      - name: End-to-end tests
+        run: pnpm --filter @shopino/backend test:e2e
+      - name: Service logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.yml logs --tail=200
+
+  build:
+    name: Production build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Prepare CI environment
+        run: bash scripts/ci/prepare-env.sh
+      - name: Build all workspaces
+        run: pnpm build
+
+  docker:
+    name: Docker images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Backend (runner)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/backend/Dockerfile
+          target: runner
+          tags: shopino/backend:ci
+          load: true
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+      - name: Migrator
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/backend/Dockerfile
+          target: migrator
+          tags: shopino/migrator:ci
+          cache-from: type=gha,scope=backend
+      - name: Frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/frontend/Dockerfile
+          tags: shopino/frontend:ci
+          load: true
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+      - name: nginx
+        uses: docker/build-push-action@v6
+        with:
+          context: deploy/nginx
+          tags: shopino/nginx:ci
+          load: true
+          cache-from: type=gha,scope=nginx
+          cache-to: type=gha,mode=max,scope=nginx
+      - name: Image checks (non-root, size)
+        run: |
+          set -euo pipefail
+          for image in shopino/backend:ci shopino/frontend:ci; do
+            user=$(docker run --rm --entrypoint id "$image" -u)
+            size=$(docker image inspect "$image" --format '{{.Size}}')
+            echo "$image uid=$user size=$((size / 1024 / 1024))MB"
+            test "$user" != "0"
+          done
+      - name: Backend refuses sandbox providers in production
+        run: |
+          set -uo pipefail
+          out=$(docker run --rm -e NODE_ENV=production -e DATABASE_URL=postgresql://u:p@127.0.0.1:5432/db \
+                  -e DIRECT_URL=postgresql://u:p@127.0.0.1:5432/db -e REDIS_HOST=127.0.0.1 -e REDIS_PORT=6379 -e REDIS_PASSWORD=x \
+                  -e JWT_ACCESS_SECRET="$(openssl rand -hex 32)" -e JWT_REFRESH_SECRET="$(openssl rand -hex 32)" \
+                  -e PUBLIC_API_ORIGIN=https://ci.test -e SHIPPING_DEFAULT_FEE_PER_VENDOR=0 \
+                  -e SHIPPING_FREE_THRESHOLD_PER_VENDOR=0 -e SMS_PROVIDER=sandbox \
+                  shopino/backend:ci 2>&1 || true)
+          echo "$out" | tail -n 5
+          echo "$out" | grep -q "SMS_PROVIDER=sandbox cannot be used in production"
+      - name: nginx renders and validates its configuration
+        run: |
+          set -euo pipefail
+          docker run -d --name edge --network host -e SHOPINO_DOMAIN=ci.shopino.test \
+            -e FRONTEND_UPSTREAM=127.0.0.1:3000 shopino/nginx:ci
+          for _ in $(seq 1 20); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' edge)" = healthy ] && break
+            sleep 2
+          done
+          docker logs edge 2>&1 | grep -v '^{'
+          test "$(docker inspect -f '{{.State.Health.Status}}' edge)" = healthy
+          curl -sk --resolve ci.shopino.test:443:127.0.0.1 -o /dev/null -D - https://ci.shopino.test/ \
+            | grep -i '^strict-transport-security'
+
+  infra-lint:
+    name: Infrastructure lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: |
+          shellcheck -x scripts/backup/*.sh scripts/ci/*.sh deploy/scripts/*.sh
+          shellcheck -s sh deploy/nginx/docker-entrypoint.sh
+      - name: Validate docker-compose.prod.yml against the env template
+        run: |
+          set -euo pipefail
+          env_file=$(mktemp)
+          # Fill every empty key of the template with a syntactically valid value.
+          sed -E 's/^([A-Z0-9_]+)=$/\1=ci-value/' deploy/env/production.env.example > "$env_file"
+          SHOPINO_ENV_FILE="$env_file" docker compose -f docker-compose.prod.yml --env-file "$env_file" config -q
+          SHOPINO_ENV_FILE="$env_file" docker compose -f docker-compose.prod.yml --env-file "$env_file" --profile ops config --services
+      - name: Validate base compose
+        run: |
+          cp .env.example .env
+          docker compose -f docker-compose.yml config -q

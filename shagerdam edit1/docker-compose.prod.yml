@@ -1,0 +1,268 @@
+# =============================================================================
+# Shopino — PRODUCTION stack (single host)
+# -----------------------------------------------------------------------------
+#   nginx ──edge──► frontend (Next.js + BFF) ──app──► backend (NestJS API)
+#                                                        │
+#                                                 data (internal network)
+#                                                        ├─► postgres
+#                                                        └─► redis
+#
+# Only nginx publishes ports (80/443). The API, the database and Redis are
+# unreachable from the internet; the `data` network has no outbound route.
+#
+# Usage (see docs/production-deployment-guide.md):
+#   export SHOPINO_ENV_FILE=/opt/shopino/.env.production
+#   docker compose -f docker-compose.prod.yml --env-file "$SHOPINO_ENV_FILE" pull   # or: build
+#   docker compose -f docker-compose.prod.yml --env-file "$SHOPINO_ENV_FILE" run --rm migrate
+#   docker compose -f docker-compose.prod.yml --env-file "$SHOPINO_ENV_FILE" up -d
+#
+# Every secret comes from the env file (template: deploy/env/production.env.example).
+# Required variables fail fast with a clear message instead of defaulting.
+# =============================================================================
+
+name: shopino-prod
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-hardening: &hardening
+  restart: unless-stopped
+  logging: *logging
+  security_opt:
+    - no-new-privileges:true
+
+# Values the API must get from compose (service discovery), overriding the file.
+x-backend-env: &backend-env
+  NODE_ENV: production
+  HOST: 0.0.0.0
+  PORT: "4000"
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  STORAGE_LOCAL_ROOT: /app/uploads
+
+services:
+  # ── PostgreSQL 16 ────────────────────────────────────────────────────────
+  postgres:
+    <<: *hardening
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+      PGDATA: /var/lib/postgresql/data/pgdata
+    command:
+      - postgres
+      - -c
+      - max_connections=${POSTGRES_MAX_CONNECTIONS:-100}
+      - -c
+      - shared_buffers=${POSTGRES_SHARED_BUFFERS:-256MB}
+      - -c
+      - log_min_duration_statement=${POSTGRES_SLOW_QUERY_MS:-1000}
+      - -c
+      - password_encryption=scram-sha-256
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    shm_size: 256mb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [data]
+    stop_grace_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: ${POSTGRES_MEMORY_LIMIT:-1g}
+
+  # ── Redis 7 (rate limits, OTP, cache, future queues) ─────────────────────
+  redis:
+    <<: *hardening
+    image: redis:7-alpine
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-256mb}
+      - --maxmemory-policy
+      - noeviction
+      - --save
+      - ""
+    volumes:
+      - redis_data:/data
+    read_only: true
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks: [data]
+    deploy:
+      resources:
+        limits:
+          memory: ${REDIS_MEMORY_LIMIT:-320m}
+
+  # ── NestJS API (private) ─────────────────────────────────────────────────
+  backend:
+    <<: *hardening
+    image: ${BACKEND_IMAGE:-shopino/backend:latest}
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+      target: runner
+    env_file:
+      - ${SHOPINO_ENV_FILE:-.env.production}
+    environment:
+      <<: *backend-env
+    volumes:
+      # Used only when STORAGE_PROVIDER=local (single node); unused with s3.
+      - uploads:/app/uploads
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    cap_drop: [ALL]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # `app` gives outbound access to SMS / payment / object-storage APIs;
+    # `data` reaches PostgreSQL and Redis.
+    networks: [app, data]
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: ${BACKEND_MEMORY_LIMIT:-768m}
+
+  # ── Next.js storefront, panels and BFF ───────────────────────────────────
+  frontend:
+    <<: *hardening
+    image: ${FRONTEND_IMAGE:-shopino/frontend:latest}
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+    # Deliberately NO env_file: the web tier never holds database, JWT or
+    # provider secrets. It only needs the private API address.
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
+      BACKEND_INTERNAL_URL: http://backend:4000
+      # Absolute URLs in canonical / Open Graph / sitemap / robots (lib/env.ts
+      # resolveSiteOrigin): PUBLIC_WEB_ORIGIN, else https://SHOPINO_DOMAIN.
+      SHOPINO_DOMAIN: ${SHOPINO_DOMAIN:?SHOPINO_DOMAIN is required}
+      PUBLIC_WEB_ORIGIN: ${PUBLIC_WEB_ORIGIN:-}
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+      - /app/apps/frontend/.next/cache:size=128m,uid=1000,gid=1000
+    cap_drop: [ALL]
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [edge, app]
+    deploy:
+      resources:
+        limits:
+          memory: ${FRONTEND_MEMORY_LIMIT:-512m}
+
+  # ── nginx edge proxy (the only published service) ────────────────────────
+  nginx:
+    <<: *hardening
+    image: ${NGINX_IMAGE:-shopino/nginx:latest}
+    build:
+      context: deploy/nginx
+    environment:
+      SHOPINO_DOMAIN: ${SHOPINO_DOMAIN:?SHOPINO_DOMAIN is required}
+      SHOPINO_EXTRA_DOMAINS: ${SHOPINO_EXTRA_DOMAINS:-}
+      CSP_EXTRA_IMG_SRC: ${CSP_EXTRA_IMG_SRC:-}
+      CSP_FORM_ACTION_EXTRA: ${CSP_FORM_ACTION_EXTRA:-https://payment.zarinpal.com}
+      TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-}
+      FRONTEND_UPSTREAM: frontend:3000
+    ports:
+      - "${HTTP_BIND:-0.0.0.0}:80:80"
+      - "${HTTPS_BIND:-0.0.0.0}:443:443"
+    volumes:
+      - letsencrypt:/etc/letsencrypt:ro
+      - certbot_webroot:/var/www/certbot:ro
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, NET_BIND_SERVICE, DAC_OVERRIDE]
+    depends_on:
+      frontend:
+        condition: service_healthy
+    networks: [edge]
+    deploy:
+      resources:
+        limits:
+          memory: ${NGINX_MEMORY_LIMIT:-256m}
+
+  # ── One-off: database migrations and seeding (profile "ops") ─────────────
+  #   docker compose ... run --rm migrate                                   # prisma migrate deploy
+  #   docker compose ... run --rm migrate ts-node --project tsconfig.json prisma/seed.ts
+  migrate:
+    image: ${MIGRATOR_IMAGE:-shopino/migrator:latest}
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+      target: migrator
+    profiles: [ops]
+    env_file:
+      - ${SHOPINO_ENV_FILE:-.env.production}
+    environment:
+      <<: *backend-env
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    logging: *logging
+    # uploads: the demo seed (SEED_PROFILE=demo) stores product images through the
+    # configured storage provider — with STORAGE_PROVIDER=local they must land in the
+    # same volume the backend serves. "app" gives outbound access for S3 storage
+    # ("data" is internal-only).
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [app, data]
+
+  # ── One-off: Let's Encrypt (profile "ops") ───────────────────────────────
+  #   docker compose ... run --rm certbot certonly --webroot -w /var/www/certbot -d example.ir ...
+  #   docker compose ... run --rm certbot renew --webroot -w /var/www/certbot
+  certbot:
+    image: certbot/certbot:v3.1.0
+    profiles: [ops]
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot_webroot:/var/www/certbot
+    logging: *logging
+    networks: [edge]
+
+volumes:
+  postgres_data:
+  redis_data:
+  uploads:
+  letsencrypt:
+  certbot_webroot:
+
+networks:
+  edge:
+    driver: bridge
+  app:
+    driver: bridge
+  data:
+    driver: bridge
+    internal: true

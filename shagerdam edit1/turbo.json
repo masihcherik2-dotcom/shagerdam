@@ -1,0 +1,92 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalDependencies": [
+    ".env.example",
+    "tsconfig.json"
+  ],
+  "globalEnv": [
+    "NODE_ENV",
+    "LOG_LEVEL"
+  ],
+  "tasks": {
+    "build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".env"
+      ],
+      "outputs": [
+        "dist/**",
+        ".next/**",
+        "!.next/cache/**"
+      ]
+    },
+    "typecheck": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": []
+    },
+    "lint": {
+      "outputs": []
+    },
+    "test": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "coverage/**"
+      ]
+    },
+    "test:e2e": {
+      "dependsOn": [
+        "^build"
+      ],
+      "cache": false,
+      "outputs": []
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "db:generate": {
+      "cache": false,
+      "outputs": []
+    },
+    "db:validate": {
+      "cache": false,
+      "outputs": []
+    },
+    "db:migrate": {
+      "cache": false,
+      "outputs": []
+    },
+    "db:deploy": {
+      "cache": false,
+      "outputs": []
+    },
+    "db:push": {
+      "cache": false,
+      "outputs": []
+    },
+    "db:seed": {
+      "cache": false,
+      "dependsOn": [
+        "db:generate"
+      ],
+      "outputs": []
+    },
+    "db:reset": {
+      "cache": false,
+      "dependsOn": [
+        "db:generate"
+      ],
+      "outputs": []
+    },
+    "clean": {
+      "cache": false
+    }
+  }
+}

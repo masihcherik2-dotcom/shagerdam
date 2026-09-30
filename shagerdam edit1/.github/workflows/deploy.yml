@@ -1,0 +1,192 @@
+# =============================================================================
+# Shopino — build, publish and deploy to the production server
+# -----------------------------------------------------------------------------
+# Triggers: a version tag (v1.2.3) or a manual run (optionally with an existing
+# tag to roll back to).
+#
+#   images  builds backend, migrator, frontend and nginx; pushes
+#           <REGISTRY>/<name>:<git sha> (+ :<version tag>) to the registry
+#   deploy  GitHub Environment "production" (add required reviewers there),
+#           SSH with a pinned host key → git checkout of the same commit on the
+#           server → deploy/scripts/deploy.sh --tag <sha> (pre-deploy backup,
+#           migrations, rolling restart, smoke test)
+#
+# Repository configuration
+#   variables  REGISTRY            e.g. ghcr.io/acme/shopino (default: ghcr.io/<owner>/shopino)
+#              DEPLOY_PATH         checkout on the server (default /opt/shopino/app)
+#   secrets    DEPLOY_HOST, DEPLOY_USER, DEPLOY_PORT (optional, default 22)
+#              DEPLOY_SSH_KEY      private key of a deploy-only user (docker group)
+#              DEPLOY_KNOWN_HOSTS  output of `ssh-keyscan -p <port> <host>` (verified!)
+#              REGISTRY_USERNAME / REGISTRY_PASSWORD  only for a non-GHCR registry
+#                                  (GHCR uses the workflow's GITHUB_TOKEN)
+# =============================================================================
+name: Deploy
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Existing image tag to deploy (rollback). Empty = build this commit."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  images:
+    name: Build and push images
+    if: ${{ github.event.inputs.image_tag == '' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    outputs:
+      registry: ${{ steps.meta.outputs.registry }}
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image coordinates
+        id: meta
+        env:
+          REGISTRY_VAR: ${{ vars.REGISTRY }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          registry="${REGISTRY_VAR:-ghcr.io/${OWNER}/shopino}"
+          {
+            echo "registry=${registry,,}"
+            echo "host=${registry%%/*}"
+            echo "tag=${GITHUB_SHA::12}"
+          } >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - name: Registry login
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ steps.meta.outputs.host }}
+          username: ${{ secrets.REGISTRY_USERNAME || github.actor }}
+          password: ${{ secrets.REGISTRY_PASSWORD || secrets.GITHUB_TOKEN }}
+      - name: Backend
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/backend/Dockerfile
+          target: runner
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.registry }}/backend:${{ steps.meta.outputs.tag }}
+            ${{ startsWith(github.ref, 'refs/tags/') && format('{0}/backend:{1}', steps.meta.outputs.registry, github.ref_name) || '' }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+      - name: Migrator
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/backend/Dockerfile
+          target: migrator
+          push: true
+          tags: ${{ steps.meta.outputs.registry }}/migrator:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha,scope=backend
+      - name: Frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.registry }}/frontend:${{ steps.meta.outputs.tag }}
+            ${{ startsWith(github.ref, 'refs/tags/') && format('{0}/frontend:{1}', steps.meta.outputs.registry, github.ref_name) || '' }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+      - name: nginx
+        uses: docker/build-push-action@v6
+        with:
+          context: deploy/nginx
+          push: true
+          tags: ${{ steps.meta.outputs.registry }}/nginx:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha,scope=nginx
+          cache-to: type=gha,mode=max,scope=nginx
+
+  deploy:
+    name: Deploy to production
+    needs: [images]
+    # Runs after a successful build, or alone for a rollback to an existing tag.
+    if: ${{ always() && (needs.images.result == 'success' || (needs.images.result == 'skipped' && github.event.inputs.image_tag != '')) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: production
+    steps:
+      - name: Resolve image tag
+        id: target
+        env:
+          BUILT_TAG: ${{ needs.images.outputs.tag }}
+          BUILT_REGISTRY: ${{ needs.images.outputs.registry }}
+          INPUT_TAG: ${{ github.event.inputs.image_tag }}
+          REGISTRY_VAR: ${{ vars.REGISTRY }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          registry="${BUILT_REGISTRY:-${REGISTRY_VAR:-ghcr.io/${OWNER}/shopino}}"
+          tag="${INPUT_TAG:-$BUILT_TAG}"
+          [[ "$tag" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "invalid image tag: $tag"; exit 1; }
+          {
+            echo "registry=${registry,,}"
+            echo "host=${registry%%/*}"
+            echo "tag=$tag"
+          } >> "$GITHUB_OUTPUT"
+      - name: Configure SSH (pinned host key)
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+      - name: Deploy over SSH
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/shopino/app' }}
+          REGISTRY: ${{ steps.target.outputs.registry }}
+          REGISTRY_HOST: ${{ steps.target.outputs.host }}
+          TAG: ${{ steps.target.outputs.tag }}
+          COMMIT: ${{ github.sha }}
+          ROLLBACK: ${{ github.event.inputs.image_tag != '' }}
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME || github.actor }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD || secrets.GITHUB_TOKEN }}
+        run: |
+          ssh_cmd=(ssh -i ~/.ssh/deploy_key -p "$PORT" -o StrictHostKeyChecking=yes -o BatchMode=yes "$USER@$HOST")
+          # Registry credentials go over stdin, never on a command line.
+          printf '%s' "$REGISTRY_PASSWORD" | "${ssh_cmd[@]}" \
+            "docker login '$REGISTRY_HOST' -u '$REGISTRY_USERNAME' --password-stdin >/dev/null"
+          "${ssh_cmd[@]}" bash -s -- "$DEPLOY_PATH" "$COMMIT" "$REGISTRY" "$TAG" "$ROLLBACK" <<'REMOTE'
+          set -euo pipefail
+          path="$1"; commit="$2"; registry="$3"; tag="$4"; rollback="$5"
+          cd "$path"
+          git fetch --quiet --tags origin
+          # Compose file + scripts from the same revision as the images. A rollback
+          # keeps the checked-out revision (the old tag's images are compatible
+          # with it only if no migration was added since — see the deployment guide).
+          if [ "$rollback" != "true" ]; then
+            git checkout --quiet --detach "$commit"
+          fi
+          deploy/scripts/deploy.sh --tag "$tag" --registry "$registry"
+          REMOTE
+      - name: Registry logout
+        if: always()
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          REGISTRY_HOST: ${{ steps.target.outputs.host }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "$PORT" -o StrictHostKeyChecking=yes -o BatchMode=yes "$USER@$HOST" \
+            "docker logout '$REGISTRY_HOST' >/dev/null" || true
+          rm -f ~/.ssh/deploy_key

@@ -1,0 +1,35 @@
+# Build context hygiene for apps/backend/Dockerfile and apps/frontend/Dockerfile.
+# Both images build from the repository root (pnpm workspace), so everything that
+# is not source must stay out of the context: secrets, dependencies, build output
+# and local data.
+
+# Secrets and local environment — never baked into an image.
+.env
+.env.*
+!.env.example
+**/*.pem
+**/*.key
+deploy/env/*.env
+
+# Dependencies and build output (rebuilt inside the image).
+**/node_modules
+**/dist
+**/.next
+**/out
+**/coverage
+**/*.tsbuildinfo
+**/.turbo
+
+# Local data and uploads.
+.docker-data
+apps/backend/uploads
+backups
+
+# VCS, CI, docs and editor files are not needed to build.
+.git
+.github
+docs
+**/*.log
+.idea
+.vscode
+**/.DS_Store

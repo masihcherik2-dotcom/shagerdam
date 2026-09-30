@@ -1,0 +1,1210 @@
+// ============================================================================
+// Shopino — Prisma schema
+// Phase 2: complete marketplace + banking-credit (BNPL) data model
+// ----------------------------------------------------------------------------
+// Conventions applied throughout this file:
+//
+//  • Primary keys   — uuid v4 (`@default(uuid())`), stored as PostgreSQL UUID.
+//  • Money          — `Decimal(15, 2)`, never floating point. The unit follows
+//                     `platform.currency` in SystemConfig (IRR = Rial).
+//  • Percentages    — `Decimal(5, 2)` (0.00–100.00).
+//  • Timestamps     — `timestamptz(3)`. Mutable rows carry `createdAt` +
+//                     `@updatedAt`; append-only rows (ledgers, audit trail,
+//                     order lines) carry `createdAt` only, because rewriting
+//                     them would destroy their evidential value.
+//  • Foreign keys   — every relation declares `onDelete` explicitly:
+//                       Cascade  → the child cannot exist without the parent
+//                                  (order lines, cart lines, media, evidence),
+//                       Restrict → financial/legal records that must never be
+//                                  orphaned or silently disappear (payments,
+//                                  ledger entries, settlements),
+//                       SetNull  → optional back-references that may outlive
+//                                  their target (ledger → order link).
+//  • Table names    — snake_case plural (`@@map`), columns snake_case (`@map`).
+//
+// The schema is applied exclusively through migrations
+// (`prisma migrate dev` / `prisma migrate deploy`); see README §5.
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ============================================================================
+// 1. IDENTITY, ACCESS & AUDIT
+// ============================================================================
+
+/// Platform identity. One row per human, whatever their role.
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  VENDOR
+  CUSTOMER
+  FINANCIAL_OFFICER
+  SUPPORT
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+/// Actions recorded in the immutable audit trail.
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  STATUS_CHANGE
+  SETTLEMENT_TRIGGER
+  PAYMENT_CAPTURE
+  CREDIT_DECISION
+  DISPUTE_RESOLUTION
+}
+
+/// Platform user. `mobile` is the primary business key: it is mandatory, unique
+/// and the identifier customers register with. `email` and `nationalCode` are
+/// optional but unique when present (they are required later in the process for
+/// vendors and credit applicants).
+model User {
+  id           String    @id @default(uuid()) @db.Uuid
+  mobile       String    @unique @db.VarChar(15)
+  email        String?   @unique @db.VarChar(254)
+  nationalCode String?   @unique @map("national_code") @db.VarChar(10)
+  fullName     String    @map("full_name") @db.VarChar(120)
+  role         UserRole  @default(CUSTOMER)
+  isActive     Boolean   @default(true) @map("is_active")
+  /// Argon2id hash. Nullable because OTP-only customer accounts exist before a
+  /// password is ever set; staff accounts always have one (enforced by the
+  /// authentication phase).
+  passwordHash String?   @map("password_hash") @db.VarChar(255)
+  lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz(3)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  customerProfile        CustomerProfile?
+  addresses              Address[]
+  vendor                 Vendor?
+  auditLogs              AuditLog[]
+  carts                  Cart[]
+  parentOrders           ParentOrder[]
+  creditAccounts         CreditAccount[]
+  creditApplications     CreditApplication[]
+  disputesRaised         Dispute[]
+  disputeEvidence        DisputeEvidence[]
+  disputesResponded      Dispute[]               @relation("DisputeVendorResponder")
+  disputesResolved       Dispute[]               @relation("DisputeResolver")
+  disputeEvents          DisputeEvent[]
+  verificationsReview    VendorVerification[]    @relation("VerificationReviewer")
+  mediaAssets            MediaAsset[]            @relation("MediaAssetOwner")
+  settlementsProcessed   SettlementRequest[]     @relation("SettlementProcessor")
+  subOrderStatusChanges  SubOrderStatusHistory[] @relation("SubOrderStatusActor")
+  productsBlocked        Product[]               @relation("ProductBlockedBy")
+  contactMessagesSent    ContactMessage[]        @relation("ContactMessageSender")
+  contactMessagesHandled ContactMessage[]        @relation("ContactMessageHandler")
+
+  @@index([role, isActive])
+  @@index([createdAt])
+  @@map("users")
+}
+
+/// Role-specific customer data. Absent for staff and for vendors.
+model CustomerProfile {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @unique @map("user_id") @db.Uuid
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  birthDate        DateTime? @map("birth_date") @db.Date
+  gender           Gender?
+  /// Sheba/IBAN: "IR" + 24 digits.
+  bankIban         String?   @map("bank_iban") @db.VarChar(26)
+  defaultAddressId String?   @unique @map("default_address_id") @db.Uuid
+  defaultAddress   Address?  @relation("CustomerDefaultAddress", fields: [defaultAddressId], references: [id], onDelete: SetNull)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("customer_profiles")
+}
+
+/// Delivery address of a user. Rows are kept even when no longer default, so
+/// historical orders can still explain where they were shipped.
+model Address {
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          String   @map("user_id") @db.Uuid
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  province        String   @db.VarChar(60)
+  city            String   @db.VarChar(60)
+  postalAddress   String   @map("postal_address") @db.Text
+  postalCode      String   @map("postal_code") @db.VarChar(10)
+  buildingNumber  String?  @map("building_number") @db.VarChar(20)
+  unitNumber      String?  @map("unit_number") @db.VarChar(20)
+  recipientName   String   @map("recipient_name") @db.VarChar(120)
+  recipientMobile String   @map("recipient_mobile") @db.VarChar(15)
+  isDefault       Boolean  @default(false) @map("is_default")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  defaultForProfile CustomerProfile? @relation("CustomerDefaultAddress")
+
+  @@index([userId, isDefault])
+  @@index([userId, createdAt])
+  @@map("addresses")
+}
+
+/// Append-only audit trail. Rows are never updated or deleted: `oldValue` /
+/// `newValue` capture the state transition, and the pair (entityName, entityId)
+/// is the query path for "history of this record".
+model AuditLog {
+  id         String      @id @default(uuid()) @db.Uuid
+  userId     String?     @map("user_id") @db.Uuid
+  user       User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action     AuditAction
+  entityName String      @map("entity_name") @db.VarChar(80)
+  entityId   String?     @map("entity_id") @db.VarChar(64)
+  ipAddress  String?     @map("ip_address") @db.VarChar(45)
+  userAgent  String?     @map("user_agent") @db.VarChar(512)
+  oldValue   Json?       @map("old_value")
+  newValue   Json?       @map("new_value")
+  createdAt  DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([entityName, entityId])
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+  @@map("audit_logs")
+}
+
+// ============================================================================
+// 2. VENDOR MANAGEMENT & VERIFICATION
+// ============================================================================
+
+enum VendorStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+/// A store operating on the marketplace. Created together with its owner User
+/// (role VENDOR); `verifiedAt` is stamped only when a reviewer approves the
+/// verification documents.
+model Vendor {
+  id                     String       @id @default(uuid()) @db.Uuid
+  userId                 String       @unique @map("user_id") @db.Uuid
+  user                   User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+  storeName              String       @map("store_name") @db.VarChar(120)
+  storeSlug              String       @unique @map("store_slug") @db.VarChar(140)
+  instagramHandle        String?      @map("instagram_handle") @db.VarChar(60)
+  logoUrl                String?      @map("logo_url") @db.VarChar(512)
+  bio                    String?      @db.Text
+  bankIban               String       @map("bank_iban") @db.VarChar(26)
+  /// Legal name of the account holder; payouts must match the IBAN holder.
+  bankAccountHolder      String?      @map("bank_account_holder") @db.VarChar(120)
+  /// Vendor-specific commission; when null, the category rate applies.
+  commissionRateOverride Decimal?     @map("commission_rate_override") @db.Decimal(5, 2)
+  /// Flat shipping fee for this store's packages; null = platform default.
+  shippingFeeOverride    Decimal?     @map("shipping_fee_override") @db.Decimal(15, 2)
+  /// Package subtotal at which this store ships for free; null = platform default, 0 = never free.
+  freeShippingThreshold  Decimal?     @map("free_shipping_threshold") @db.Decimal(15, 2)
+  status                 VendorStatus @default(PENDING)
+  verifiedAt             DateTime?    @map("verified_at") @db.Timestamptz(3)
+  createdAt              DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  verifications      VendorVerification[]
+  mediaAssets        MediaAsset[]         @relation("VendorMediaAssets")
+  products           Product[]
+  subOrders          SubOrder[]
+  disputes           Dispute[]
+  wallet             VendorWallet?
+  settlementRequests SettlementRequest[]
+
+  @@index([status])
+  @@index([status, createdAt])
+  @@map("vendors")
+}
+
+/// Verification dossier of a vendor. A vendor may have several rows over time
+/// (resubmission after a rejection); the review outcome is recorded per row.
+model VendorVerification {
+  id                  String    @id @default(uuid()) @db.Uuid
+  vendorId            String    @map("vendor_id") @db.Uuid
+  vendor              Vendor    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  nationalCardDocUrl  String    @map("national_card_doc_url") @db.VarChar(512)
+  businessDocUrl      String?   @map("business_doc_url") @db.VarChar(512)
+  /// Proof that the declared IBAN belongs to the store owner (bank statement / cheque).
+  bankAccountProofUrl String?   @map("bank_account_proof_url") @db.VarChar(512)
+  rejectionReason     String?   @map("rejection_reason") @db.Text
+  reviewedByUserId    String?   @map("reviewed_by_user_id") @db.Uuid
+  reviewedBy          User?     @relation("VerificationReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  reviewedAt          DateTime? @map("reviewed_at") @db.Timestamptz(3)
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([vendorId, createdAt])
+  @@index([reviewedByUserId])
+  @@map("vendor_verifications")
+}
+
+// ============================================================================
+// 3. CATALOG, HIERARCHICAL CATEGORIES & VARIANTS
+// ============================================================================
+
+/// Self-referencing category tree. `defaultCommissionRate` is the platform's
+/// commission for products in this category unless the vendor has an override.
+model Category {
+  id                    String     @id @default(uuid()) @db.Uuid
+  parentId              String?    @map("parent_id") @db.Uuid
+  parent                Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children              Category[] @relation("CategoryTree")
+  slug                  String     @unique @db.VarChar(80)
+  titleFa               String     @map("title_fa") @db.VarChar(120)
+  titleEn               String?    @map("title_en") @db.VarChar(120)
+  defaultCommissionRate Decimal    @default(0) @map("default_commission_rate") @db.Decimal(5, 2)
+  sortOrder             Int        @default(0) @map("sort_order")
+  isActive              Boolean    @default(true) @map("is_active")
+  createdAt             DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  products Product[]
+
+  @@index([parentId, sortOrder])
+  @@index([isActive])
+  @@map("categories")
+}
+
+/// A product published by exactly one vendor. `basePrice` is the display price;
+/// the price actually charged is the selected variant's `price`.
+model Product {
+  id               String    @id @default(uuid()) @db.Uuid
+  vendorId         String    @map("vendor_id") @db.Uuid
+  vendor           Vendor    @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  categoryId       String    @map("category_id") @db.Uuid
+  category         Category  @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  title            String    @db.VarChar(200)
+  slug             String    @unique @db.VarChar(220)
+  description      String?   @db.Text
+  brand            String?   @db.VarChar(80)
+  basePrice        Decimal   @map("base_price") @db.Decimal(15, 2)
+  /// Vendor-controlled visibility. Cannot be switched on while `isBlockedByAdmin` is true.
+  isPublished      Boolean   @default(false) @map("is_published")
+  /// Staff moderation flag: a blocked product is never public, whatever the vendor sets.
+  isBlockedByAdmin Boolean   @default(false) @map("is_blocked_by_admin")
+  blockedReason    String?   @map("blocked_reason") @db.VarChar(500)
+  blockedAt        DateTime? @map("blocked_at") @db.Timestamptz(3)
+  blockedByUserId  String?   @map("blocked_by_user_id") @db.Uuid
+  blockedBy        User?     @relation("ProductBlockedBy", fields: [blockedByUserId], references: [id], onDelete: SetNull)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  variants       ProductVariant[]
+  media          ProductMedia[]
+  specifications ProductSpecification[]
+
+  @@index([vendorId, isPublished])
+  @@index([categoryId, isPublished])
+  @@index([isPublished, createdAt])
+  @@index([isPublished, isBlockedByAdmin, createdAt])
+  /// pg_trgm GIN indexes: substring (ILIKE '%…%') search on Persian text.
+  @@index([title(ops: raw("gin_trgm_ops"))], type: Gin, map: "products_title_trgm_idx")
+  @@index([description(ops: raw("gin_trgm_ops"))], type: Gin, map: "products_description_trgm_idx")
+  @@index([brand(ops: raw("gin_trgm_ops"))], type: Gin, map: "products_brand_trgm_idx")
+  @@map("products")
+}
+
+/// Sellable unit of a product: the only thing that can be added to a cart or
+/// referenced by an order line. `compareAtPrice` drives the "was/now" display.
+model ProductVariant {
+  id               String   @id @default(uuid()) @db.Uuid
+  productId        String   @map("product_id") @db.Uuid
+  product          Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sku              String   @unique @db.VarChar(64)
+  colorName        String?  @map("color_name") @db.VarChar(40)
+  colorHex         String?  @map("color_hex") @db.VarChar(7)
+  size             String?  @db.VarChar(20)
+  guarantee        String?  @db.VarChar(60)
+  price            Decimal  @db.Decimal(15, 2)
+  compareAtPrice   Decimal? @map("compare_at_price") @db.Decimal(15, 2)
+  /// On-hand units. DB CHECK: stock_quantity >= 0 AND reserved_quantity >= 0 AND reserved_quantity <= stock_quantity.
+  stockQuantity    Int      @default(0) @map("stock_quantity")
+  /// Units held by unfinished checkouts; sellable = stockQuantity - reservedQuantity.
+  reservedQuantity Int      @default(0) @map("reserved_quantity")
+  weightGrams      Int?     @map("weight_grams")
+  isActive         Boolean  @default(true) @map("is_active")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  cartItems  CartItem[]
+  orderItems OrderItem[]
+
+  @@index([productId, isActive])
+  @@index([isActive, price])
+  @@map("product_variants")
+}
+
+/// Gallery of a product. Exactly one row should have `isPrimary = true`.
+/// One stored file.
+///
+/// Every upload leaves a row here, so the platform always knows what exists in
+/// the object store, who owns it and whether it may be served anonymously. It is
+/// deliberately independent of `ProductMedia` (which links catalogue rows to
+/// their images): logos, avatars and KYC documents are not catalogue data.
+model MediaAsset {
+  id              String    @id @default(uuid()) @db.Uuid
+  ownerUserId     String?   @map("owner_user_id") @db.Uuid
+  owner           User?     @relation("MediaAssetOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  vendorId        String?   @map("vendor_id") @db.Uuid
+  vendor          Vendor?   @relation("VendorMediaAssets", fields: [vendorId], references: [id], onDelete: SetNull)
+  kind            MediaKind
+  /// Business purpose, e.g. `store_logo`, `avatar`, `kyc_national_id`.
+  purpose         String    @db.VarChar(60)
+  /// Which provider wrote the file, so a migration between providers is traceable.
+  storageProvider String    @map("storage_provider") @db.VarChar(20)
+  /// Provider-relative object key. Unique: one file, one row.
+  path            String    @unique @db.VarChar(512)
+  thumbnailPath   String?   @map("thumbnail_path") @db.VarChar(512)
+  url             String    @db.VarChar(1024)
+  thumbnailUrl    String?   @map("thumbnail_url") @db.VarChar(1024)
+  mimeType        String    @map("mime_type") @db.VarChar(100)
+  originalName    String?   @map("original_name") @db.VarChar(255)
+  sizeBytes       Int       @map("size_bytes")
+  width           Int?
+  height          Int?
+  /// Documents default to private: KYC material must never be world-readable.
+  isPublic        Boolean   @default(false) @map("is_public")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  productMedia    ProductMedia[]
+  disputeEvidence DisputeEvidence[]
+
+  @@index([ownerUserId, kind, createdAt])
+  @@index([vendorId, purpose])
+  @@index([kind, isPublic, createdAt])
+  @@index([purpose, url])
+  @@map("media_assets")
+}
+
+model ProductMedia {
+  id           String      @id @default(uuid()) @db.Uuid
+  productId    String      @map("product_id") @db.Uuid
+  product      Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  /// The uploaded file (Phase-4 storage pipeline) this gallery entry was created from.
+  mediaAssetId String?     @map("media_asset_id") @db.Uuid
+  mediaAsset   MediaAsset? @relation(fields: [mediaAssetId], references: [id], onDelete: SetNull)
+  url          String      @db.VarChar(512)
+  thumbnailUrl String?     @map("thumbnail_url") @db.VarChar(512)
+  isPrimary    Boolean     @default(false) @map("is_primary")
+  sortOrder    Int         @default(0) @map("sort_order")
+  createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([productId, sortOrder])
+  @@index([mediaAssetId])
+  @@map("product_media")
+}
+
+/// One technical-specification row of a product (key/value, optionally grouped),
+/// e.g. group «حافظه» › «حافظه داخلی» = «256 گیگابایت». Typed by the vendor or
+/// pre-filled by the product importer; the vendor's save is what persists it, and
+/// an update replaces the whole list. DB CHECKs: non-blank title and value.
+model ProductSpecification {
+  id         String   @id @default(uuid()) @db.Uuid
+  productId  String   @map("product_id") @db.Uuid
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  groupTitle String?  @map("group_title") @db.VarChar(100)
+  title      String   @db.VarChar(150)
+  value      String   @db.VarChar(2000)
+  sortOrder  Int      @default(0) @map("sort_order")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([productId, sortOrder])
+  @@map("product_specifications")
+}
+
+// ============================================================================
+// 4. CART, MULTI-VENDOR ORDER SPLITTING & LOGISTICS
+// ============================================================================
+
+/// What a stored file is. Images run through the Sharp pipeline; documents are
+/// stored as received and are never publicly readable.
+enum MediaKind {
+  IMAGE
+  DOCUMENT
+}
+
+enum PaymentMethod {
+  CASH_IPG
+  BANK_CREDIT
+  HYBRID
+}
+
+enum ParentOrderPaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  CANCELLED
+}
+
+enum SubOrderStatus {
+  PENDING_APPROVAL
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  REFUNDED
+}
+
+/// Shopping cart. Either owned by a registered user (`userId`) or anonymous
+/// (`sessionToken`); both are unique so a cart is addressable by exactly one
+/// key. The application layer guarantees one of the two is always set.
+model Cart {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String?  @unique @map("user_id") @db.Uuid
+  user         User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionToken String?  @unique @map("session_token") @db.VarChar(64)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  items CartItem[]
+
+  @@index([updatedAt])
+  @@map("carts")
+}
+
+/// One line of a cart. A variant appears at most once per cart: quantity changes
+/// are an update, never a second row.
+model CartItem {
+  id                String         @id @default(uuid()) @db.Uuid
+  cartId            String         @map("cart_id") @db.Uuid
+  cart              Cart           @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  productVariantId  String         @map("product_variant_id") @db.Uuid
+  productVariant    ProductVariant @relation(fields: [productVariantId], references: [id], onDelete: Cascade)
+  quantity          Int
+  /// Unit price the customer last saw for this line; checkout compares it with the live price.
+  unitPriceSnapshot Decimal        @map("unit_price_snapshot") @db.Decimal(15, 2)
+  createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([cartId, productVariantId])
+  @@index([productVariantId])
+  @@map("cart_items")
+}
+
+/// A customer checkout, which may span several vendors. Totals here are the
+/// authoritative amounts for payment; per-vendor money lives on SubOrder.
+/// `shippingAddressSnapshot` freezes the delivery address at checkout time so a
+/// later address edit cannot rewrite order history.
+model ParentOrder {
+  id                      String                   @id @default(uuid()) @db.Uuid
+  orderNumber             String                   @unique @map("order_number") @db.VarChar(20)
+  userId                  String                   @map("user_id") @db.Uuid
+  user                    User                     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  shippingAddressSnapshot Json                     @map("shipping_address_snapshot")
+  totalItemsAmount        Decimal                  @map("total_items_amount") @db.Decimal(15, 2)
+  totalShippingFee        Decimal                  @default(0) @map("total_shipping_fee") @db.Decimal(15, 2)
+  totalDiscountAmount     Decimal                  @default(0) @map("total_discount_amount") @db.Decimal(15, 2)
+  finalPayableAmount      Decimal                  @map("final_payable_amount") @db.Decimal(15, 2)
+  paymentMethod           PaymentMethod            @map("payment_method")
+  paymentStatus           ParentOrderPaymentStatus @default(PENDING) @map("payment_status")
+  customerNote            String?                  @map("customer_note") @db.VarChar(500)
+  /// Unpaid orders are cancelled (and their reservations released) after this instant.
+  paymentExpiresAt        DateTime?                @map("payment_expires_at") @db.Timestamptz(3)
+  paidAt                  DateTime?                @map("paid_at") @db.Timestamptz(3)
+  cancelledAt             DateTime?                @map("cancelled_at") @db.Timestamptz(3)
+  cancellationReason      String?                  @map("cancellation_reason") @db.VarChar(500)
+  createdAt               DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt               DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  subOrders            SubOrder[]
+  payments             Payment[]
+  creditTransactions   CreditTransaction[]
+  installmentSchedules InstallmentSchedule[]
+
+  @@index([userId, createdAt])
+  @@index([paymentStatus, createdAt])
+  @@index([paymentStatus, paymentExpiresAt])
+  @@index([createdAt])
+  @@map("parent_orders")
+}
+
+/// Per-vendor slice of a parent order. Carries the money split: what the vendor
+/// earns (`vendorEarningsAmount`) versus what the platform keeps
+/// (`platformCommissionAmount`).
+model SubOrder {
+  id                       String         @id @default(uuid()) @db.Uuid
+  parentOrderId            String         @map("parent_order_id") @db.Uuid
+  parentOrder              ParentOrder    @relation(fields: [parentOrderId], references: [id], onDelete: Cascade)
+  vendorId                 String         @map("vendor_id") @db.Uuid
+  vendor                   Vendor         @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  subOrderNumber           String         @unique @map("sub_order_number") @db.VarChar(24)
+  itemsSubtotal            Decimal        @map("items_subtotal") @db.Decimal(15, 2)
+  shippingFee              Decimal        @default(0) @map("shipping_fee") @db.Decimal(15, 2)
+  platformCommissionAmount Decimal        @map("platform_commission_amount") @db.Decimal(15, 2)
+  vendorEarningsAmount     Decimal        @map("vendor_earnings_amount") @db.Decimal(15, 2)
+  status                   SubOrderStatus @default(PENDING_APPROVAL)
+  trackingCode             String?        @map("tracking_code") @db.VarChar(40)
+  carrierName              String?        @map("carrier_name") @db.VarChar(80)
+  shippedAt                DateTime?      @map("shipped_at") @db.Timestamptz(3)
+  deliveredAt              DateTime?      @map("delivered_at") @db.Timestamptz(3)
+  cancelledAt              DateTime?      @map("cancelled_at") @db.Timestamptz(3)
+  cancellationReason       String?        @map("cancellation_reason") @db.VarChar(500)
+  /// Set when the escrowed amount moves from pendingBalance to withdrawable.
+  escrowReleasedAt         DateTime?      @map("escrow_released_at") @db.Timestamptz(3)
+  createdAt                DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  items              OrderItem[]
+  walletTransactions WalletTransaction[]
+  disputes           Dispute[]
+  statusHistory      SubOrderStatusHistory[]
+
+  @@index([parentOrderId])
+  @@index([vendorId, status, createdAt])
+  @@index([status, createdAt])
+  @@map("sub_orders")
+}
+
+/// Append-only timeline of sub-order status changes (who, when, why).
+model SubOrderStatusHistory {
+  id          String          @id @default(uuid()) @db.Uuid
+  subOrderId  String          @map("sub_order_id") @db.Uuid
+  subOrder    SubOrder        @relation(fields: [subOrderId], references: [id], onDelete: Cascade)
+  fromStatus  SubOrderStatus? @map("from_status")
+  toStatus    SubOrderStatus  @map("to_status")
+  /// Null for system transitions (payment timeout, gateway callbacks).
+  actorUserId String?         @map("actor_user_id") @db.Uuid
+  actorUser   User?           @relation("SubOrderStatusActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  actorRole   String          @map("actor_role") @db.VarChar(20)
+  note        String?         @db.VarChar(500)
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([subOrderId, createdAt])
+  @@map("sub_order_status_history")
+}
+
+/// Immutable order line. Every value that can change later (title, variant,
+/// price, discount, commission) is captured as a snapshot at placement time, so
+/// editing a product never rewrites history. `productVariantId` is nullable with
+/// SET NULL: the line survives even if the variant is removed from the catalog.
+model OrderItem {
+  id                      String          @id @default(uuid()) @db.Uuid
+  subOrderId              String          @map("sub_order_id") @db.Uuid
+  subOrder                SubOrder        @relation(fields: [subOrderId], references: [id], onDelete: Cascade)
+  productVariantId        String?         @map("product_variant_id") @db.Uuid
+  productVariant          ProductVariant? @relation(fields: [productVariantId], references: [id], onDelete: SetNull)
+  productTitleSnapshot    String          @map("product_title_snapshot") @db.VarChar(200)
+  vendorStoreNameSnapshot String          @map("vendor_store_name_snapshot") @db.VarChar(120)
+  /// SKU at checkout; the variant row may later change or disappear.
+  skuSnapshot             String          @map("sku_snapshot") @db.VarChar(64)
+  /// { colorName, colorHex, size, guarantee } captured at checkout.
+  variantDetailsSnapshot  Json            @map("variant_details_snapshot")
+  unitPriceSnapshot       Decimal         @map("unit_price_snapshot") @db.Decimal(15, 2)
+  discountSnapshot        Decimal         @default(0) @map("discount_snapshot") @db.Decimal(15, 2)
+  commissionRateSnapshot  Decimal         @map("commission_rate_snapshot") @db.Decimal(5, 2)
+  quantity                Int
+  totalLineAmount         Decimal         @map("total_line_amount") @db.Decimal(15, 2)
+  createdAt               DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([subOrderId])
+  @@index([productVariantId])
+  @@map("order_items")
+}
+
+// ============================================================================
+// 5. PAYMENTS, ESCROW & VENDOR SETTLEMENTS
+// ============================================================================
+
+enum PaymentPurpose {
+  ORDER_CHECKOUT
+  INSTALLMENT_REPAYMENT
+}
+
+enum PaymentStatus {
+  INITIATED
+  SUCCESSFUL
+  FAILED
+  REFUNDED
+}
+
+enum WalletTransactionType {
+  CREDIT_SALE_ESCROW_HOLD
+  ESCROW_RELEASE_TO_WITHDRAWABLE
+  COMMISSION_DEDUCTION
+  SETTLEMENT_PAYOUT
+  REFUND_DEDUCTION
+  /// Withdrawable → settlement hold when a vendor requests a payout.
+  SETTLEMENT_HOLD
+  /// Settlement hold → withdrawable when finance rejects the request.
+  SETTLEMENT_HOLD_RELEASE
+  /// Escrow (PENDING) or WITHDRAWABLE → DISPUTE_HOLD when a customer opens a dispute (Phase 9).
+  DISPUTE_HOLD_LOCK
+  /// DISPUTE_HOLD → WITHDRAWABLE (vendor favour) or back to its source bucket (dispute cancelled).
+  DISPUTE_HOLD_RELEASE
+}
+
+/// Balance bucket of a vendor wallet a ledger row moves money in.
+enum WalletBalanceBucket {
+  PENDING
+  WITHDRAWABLE
+  SETTLEMENT_HOLD
+  /// Earnings frozen while a dispute about the package is open (Phase 9).
+  DISPUTE_HOLD
+}
+
+enum SettlementStatus {
+  REQUESTED
+  PROCESSING
+  PAID_PAYA
+  REJECTED
+}
+
+/// Payment attempt against a parent order. A hybrid order settles partly from
+/// the customer's wallet/IPG (`cashAmount`) and partly from bank credit
+/// (`creditAmount`); the two always add up to the order's final payable amount.
+/// `gatewayName` is a string, not an enum: gateways are configuration, and
+/// adding one must not require a migration.
+model Payment {
+  id                    String               @id @default(uuid()) @db.Uuid
+  parentOrderId         String               @map("parent_order_id") @db.Uuid
+  parentOrder           ParentOrder          @relation(fields: [parentOrderId], references: [id], onDelete: Restrict)
+  /// What the money is for: the order itself, or one instalment of a BNPL order.
+  purpose               PaymentPurpose       @default(ORDER_CHECKOUT)
+  /// How this attempt splits the amount (CASH_IPG = card only, BANK_CREDIT = credit only, HYBRID = both).
+  paymentMethod         PaymentMethod        @default(CASH_IPG) @map("payment_method")
+  /// Credit line used by a BANK_CREDIT / HYBRID attempt.
+  creditAccountId       String?              @map("credit_account_id") @db.Uuid
+  creditAccount         CreditAccount?       @relation(fields: [creditAccountId], references: [id], onDelete: Restrict)
+  /// Instalment plan chosen for the credit part.
+  installmentPlanId     String?              @map("installment_plan_id") @db.Uuid
+  installmentPlan       InstallmentPlan?     @relation(fields: [installmentPlanId], references: [id], onDelete: Restrict)
+  /// Provider reservation reference of the credit part (reserve → commit | release).
+  creditReservationRef  String?              @map("credit_reservation_ref") @db.VarChar(80)
+  /// The instalment an INSTALLMENT_REPAYMENT payment settles.
+  installmentScheduleId String?              @map("installment_schedule_id") @db.Uuid
+  installmentSchedule   InstallmentSchedule? @relation(fields: [installmentScheduleId], references: [id], onDelete: Restrict)
+  gatewayName           String               @map("gateway_name") @db.VarChar(40)
+  gatewayTrackingToken  String?              @map("gateway_tracking_token") @db.VarChar(120)
+  bankRrn               String?              @map("bank_rrn") @db.VarChar(40)
+  cashAmount            Decimal              @default(0) @map("cash_amount") @db.Decimal(15, 2)
+  creditAmount          Decimal              @default(0) @map("credit_amount") @db.Decimal(15, 2)
+  status                PaymentStatus        @default(INITIATED)
+  paidAt                DateTime?            @map("paid_at") @db.Timestamptz(3)
+  metadata              Json?
+  createdAt             DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([parentOrderId, status])
+  @@index([status, createdAt])
+  @@index([gatewayTrackingToken])
+  @@index([installmentScheduleId, status])
+  @@index([creditAccountId])
+  @@map("payments")
+}
+
+/// Escrow wallet of a vendor. The balance columns are the projection of the
+/// ledger (`WalletTransaction`), maintained in the same database transaction as
+/// every ledger write, one column per ledger bucket:
+///   pendingBalance         — PENDING bucket: vendor earnings of paid packages
+///                            that are not delivered yet (escrow),
+///   withdrawableBalance    — WITHDRAWABLE bucket: released, requestable,
+///   settlementHoldBalance  — SETTLEMENT_HOLD bucket: reserved by open
+///                            settlement requests awaiting finance,
+///   totalEarnedBalance     — earnings released on delivery (minus refunds of
+///                            delivered packages),
+///   totalWithdrawnAmount   — lifetime amount paid out by PAYA.
+/// CHECK constraints keep every balance >= 0 (migration phase7_finance).
+model VendorWallet {
+  id                    String   @id @default(uuid()) @db.Uuid
+  vendorId              String   @unique @map("vendor_id") @db.Uuid
+  vendor                Vendor   @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  pendingBalance        Decimal  @default(0) @map("pending_balance") @db.Decimal(15, 2)
+  withdrawableBalance   Decimal  @default(0) @map("withdrawable_balance") @db.Decimal(15, 2)
+  settlementHoldBalance Decimal  @default(0) @map("settlement_hold_balance") @db.Decimal(15, 2)
+  /// Earnings frozen by open disputes; never withdrawable (Phase 9).
+  disputeHoldBalance    Decimal  @default(0) @map("dispute_hold_balance") @db.Decimal(15, 2)
+  totalEarnedBalance    Decimal  @default(0) @map("total_earned_balance") @db.Decimal(15, 2)
+  totalWithdrawnAmount  Decimal  @default(0) @map("total_withdrawn_amount") @db.Decimal(15, 2)
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  transactions WalletTransaction[]
+
+  @@index([updatedAt])
+  @@map("vendor_wallets")
+}
+
+/// Append-only wallet ledger. Every row moves money in exactly one bucket of
+/// the wallet: `amount` is the signed change (negative = debit) and
+/// `balanceAfter` is that bucket's balance right after the row, so for every
+/// wallet and bucket SUM(amount) equals the wallet column. A transfer between
+/// two buckets (escrow release, settlement hold/release) is written as a pair
+/// of rows with the same type that sum to zero.
+/// Partial unique indexes (migration phase7_finance) make each sub-order and
+/// settlement movement happen at most once per type and bucket.
+model WalletTransaction {
+  id                  String                @id @default(uuid()) @db.Uuid
+  walletId            String                @map("wallet_id") @db.Uuid
+  wallet              VendorWallet          @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  subOrderId          String?               @map("sub_order_id") @db.Uuid
+  subOrder            SubOrder?             @relation(fields: [subOrderId], references: [id], onDelete: SetNull)
+  settlementRequestId String?               @map("settlement_request_id") @db.Uuid
+  settlementRequest   SettlementRequest?    @relation(fields: [settlementRequestId], references: [id], onDelete: SetNull)
+  /// Dispute whose freeze / resolution produced this row (Phase 9).
+  disputeId           String?               @map("dispute_id") @db.Uuid
+  dispute             Dispute?              @relation(fields: [disputeId], references: [id], onDelete: SetNull)
+  type                WalletTransactionType
+  bucket              WalletBalanceBucket
+  amount              Decimal               @db.Decimal(15, 2)
+  balanceAfter        Decimal               @map("balance_after") @db.Decimal(15, 2)
+  description         String?               @db.VarChar(255)
+  createdAt           DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([walletId, createdAt])
+  @@index([walletId, bucket])
+  @@index([subOrderId])
+  @@index([settlementRequestId])
+  @@index([disputeId])
+  @@map("wallet_transactions")
+}
+
+/// Vendor payout request. `amount` is validated against the wallet's
+/// withdrawable balance by the settlement service; `processedByUserId` records
+/// which staff member authorised the bank transfer (PAYA).
+model SettlementRequest {
+  id                String           @id @default(uuid()) @db.Uuid
+  vendorId          String           @map("vendor_id") @db.Uuid
+  vendor            Vendor           @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  amount            Decimal          @db.Decimal(15, 2)
+  targetIban        String           @map("target_iban") @db.VarChar(26)
+  status            SettlementStatus @default(REQUESTED)
+  bankPayaReference String?          @map("bank_paya_reference") @db.VarChar(60)
+  processedByUserId String?          @map("processed_by_user_id") @db.Uuid
+  processedBy       User?            @relation("SettlementProcessor", fields: [processedByUserId], references: [id], onDelete: SetNull)
+  processedAt       DateTime?        @map("processed_at") @db.Timestamptz(3)
+  rejectionReason   String?          @map("rejection_reason") @db.VarChar(500)
+  createdAt         DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  walletTransactions WalletTransaction[]
+
+  @@index([vendorId, status, createdAt])
+  @@index([status, createdAt])
+  @@map("settlement_requests")
+}
+
+// ============================================================================
+// 6. BANKING CREDIT, BNPL ENGINE & INSTALLMENTS
+// ============================================================================
+
+enum CreditAccountStatus {
+  ACTIVE
+  FROZEN
+  CLOSED
+}
+
+enum CreditApplicationStatus {
+  DRAFT
+  PENDING_BANK_INQUIRY
+  DOCS_REQUIRED
+  APPROVED
+  REJECTED
+}
+
+enum CreditTransactionType {
+  CREDIT_ALLOCATION
+  PURCHASE_RESERVE_HOLD
+  PURCHASE_COMMIT
+  RESERVATION_RELEASE
+  INSTALLMENT_REPAYMENT_RESTORE
+  REFUND_RESTORE
+}
+
+enum InstallmentStatus {
+  PENDING
+  PAID
+  OVERDUE
+  WAIVED
+}
+
+/// Bank or fintech partner that issues credit. `code` is the stable identifier
+/// used by configuration (`SANDBOX_BANK`, `SAMAN_BANK`, `BLUBANK`, `DIGIPAY`);
+/// `config` holds provider-specific settings (base URL, merchant id, …) so that
+/// onboarding a provider is a data change, not a deploy.
+model CreditProvider {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @db.VarChar(80)
+  code      String   @unique @db.VarChar(40)
+  isActive  Boolean  @default(false) @map("is_active")
+  config    Json?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  accounts         CreditAccount[]
+  applications     CreditApplication[]
+  installmentPlans InstallmentPlan[]
+
+  @@index([isActive])
+  @@map("credit_providers")
+}
+
+/// Credit line of a customer at one provider. `availableAmount` is stored (not
+/// computed on read) because checkout must reject an over-limit purchase under a
+/// row lock. The ledger (`CreditTransaction`) is the source of truth; the four
+/// amounts are its maintained projection.
+/// Invariant enforced by the credit service: available = total − used − reserved.
+model CreditAccount {
+  id              String              @id @default(uuid()) @db.Uuid
+  userId          String              @map("user_id") @db.Uuid
+  user            User                @relation(fields: [userId], references: [id], onDelete: Restrict)
+  providerId      String              @map("provider_id") @db.Uuid
+  provider        CreditProvider      @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  totalLimit      Decimal             @map("total_limit") @db.Decimal(15, 2)
+  usedAmount      Decimal             @default(0) @map("used_amount") @db.Decimal(15, 2)
+  reservedAmount  Decimal             @default(0) @map("reserved_amount") @db.Decimal(15, 2)
+  availableAmount Decimal             @map("available_amount") @db.Decimal(15, 2)
+  status          CreditAccountStatus @default(ACTIVE)
+  expiresAt       DateTime?           @map("expires_at") @db.Timestamptz(3)
+  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  transactions         CreditTransaction[]
+  installmentSchedules InstallmentSchedule[]
+  payments             Payment[]
+
+  @@unique([userId, providerId])
+  @@index([userId, status])
+  @@index([providerId, status])
+  @@map("credit_accounts")
+}
+
+/// Loan application submitted to a provider. The bank's raw answer is stored in
+/// `bankScoreResponse` for audit; `approvedLimit` is what the decision service
+/// used when opening or updating the CreditAccount.
+model CreditApplication {
+  id                          String                  @id @default(uuid()) @db.Uuid
+  userId                      String                  @map("user_id") @db.Uuid
+  user                        User                    @relation(fields: [userId], references: [id], onDelete: Restrict)
+  providerId                  String                  @map("provider_id") @db.Uuid
+  provider                    CreditProvider          @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  requestedLimit              Decimal                 @map("requested_limit") @db.Decimal(15, 2)
+  approvedLimit               Decimal?                @map("approved_limit") @db.Decimal(15, 2)
+  status                      CreditApplicationStatus @default(DRAFT)
+  bankApplicationTrackingCode String?                 @map("bank_application_tracking_code") @db.VarChar(60)
+  bankScoreResponse           Json?                   @map("bank_score_response")
+  /// Short machine-readable reason of a REJECTED decision (e.g. SCORE_BELOW_THRESHOLD).
+  decisionReason              String?                 @map("decision_reason") @db.VarChar(120)
+  decidedAt                   DateTime?               @map("decided_at") @db.Timestamptz(3)
+  createdAt                   DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                   DateTime                @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([userId, status, createdAt])
+  @@index([providerId, status])
+  @@index([bankApplicationTrackingCode])
+  @@map("credit_applications")
+}
+
+/// Append-only credit ledger. Every movement of a credit line is one row; the
+/// order or repayment that caused it is referenced by `parentOrderId` and
+/// `referenceCode`. Balance semantics per type:
+///   CREDIT_ALLOCATION                → available +amount (limit granted/increased)
+///   PURCHASE_RESERVE_HOLD            → reserved +amount, available −amount
+///   PURCHASE_COMMIT                  → reserved −amount, used +amount
+///   RESERVATION_RELEASE              → reserved −amount, available +amount
+///   INSTALLMENT_REPAYMENT_RESTORE    → used −amount, available +amount
+///   REFUND_RESTORE                   → used −amount, available +amount
+/// `amount` is always positive (the type carries the direction); `balanceAfter`
+/// is the account's availableAmount after the movement. `referenceCode` is the
+/// application id (allocation), the provider reservation ref (hold / commit /
+/// release) or the instalment id (repayment); (type, referenceCode) is unique,
+/// and a reservation ends at most once (commit XOR release) — migration phase8_credit.
+model CreditTransaction {
+  id              String                @id @default(uuid()) @db.Uuid
+  creditAccountId String                @map("credit_account_id") @db.Uuid
+  creditAccount   CreditAccount         @relation(fields: [creditAccountId], references: [id], onDelete: Restrict)
+  parentOrderId   String?               @map("parent_order_id") @db.Uuid
+  parentOrder     ParentOrder?          @relation(fields: [parentOrderId], references: [id], onDelete: SetNull)
+  type            CreditTransactionType
+  amount          Decimal               @db.Decimal(15, 2)
+  balanceAfter    Decimal               @map("balance_after") @db.Decimal(15, 2)
+  referenceCode   String                @map("reference_code") @db.VarChar(80)
+  createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([creditAccountId, createdAt])
+  @@index([parentOrderId])
+  @@index([referenceCode])
+  @@map("credit_transactions")
+}
+
+/// Productised instalment offer of a provider (3 × 0 %, 6 × …, 12 × …).
+/// `penaltyRatePercentPerMonth` is the late-payment penalty applied per month of
+/// delay, used when an InstallmentSchedule turns OVERDUE.
+model InstallmentPlan {
+  id                         String         @id @default(uuid()) @db.Uuid
+  providerId                 String         @map("provider_id") @db.Uuid
+  provider                   CreditProvider @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  title                      String         @db.VarChar(120)
+  durationMonths             Int            @map("duration_months")
+  interestRatePercent        Decimal        @map("interest_rate_percent") @db.Decimal(5, 2)
+  penaltyRatePercentPerMonth Decimal        @map("penalty_rate_percent_per_month") @db.Decimal(5, 2)
+  isActive                   Boolean        @default(true) @map("is_active")
+  createdAt                  DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                  DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  payments Payment[]
+
+  @@unique([providerId, durationMonths])
+  @@index([providerId, isActive])
+  @@map("installment_plans")
+}
+
+/// One instalment of a BNPL purchase. The full schedule is generated at
+/// checkout inside the same transaction that commits the credit line, so the
+/// customer's obligations and the credit ledger can never disagree.
+/// (order, instalmentNumber) is unique: a schedule cannot contain duplicates.
+model InstallmentSchedule {
+  id                String            @id @default(uuid()) @db.Uuid
+  parentOrderId     String            @map("parent_order_id") @db.Uuid
+  parentOrder       ParentOrder       @relation(fields: [parentOrderId], references: [id], onDelete: Restrict)
+  creditAccountId   String            @map("credit_account_id") @db.Uuid
+  creditAccount     CreditAccount     @relation(fields: [creditAccountId], references: [id], onDelete: Restrict)
+  installmentNumber Int               @map("installment_number")
+  totalInstallments Int               @map("total_installments")
+  dueDate           DateTime          @map("due_date") @db.Date
+  principalAmount   Decimal           @map("principal_amount") @db.Decimal(15, 2)
+  interestAmount    Decimal           @default(0) @map("interest_amount") @db.Decimal(15, 2)
+  totalAmount       Decimal           @map("total_amount") @db.Decimal(15, 2)
+  penaltyAmount     Decimal           @default(0) @map("penalty_amount") @db.Decimal(15, 2)
+  paidAmount        Decimal           @default(0) @map("paid_amount") @db.Decimal(15, 2)
+  status            InstallmentStatus @default(PENDING)
+  paidAt            DateTime?         @map("paid_at") @db.Timestamptz(3)
+  bankTransactionId String?           @map("bank_transaction_id") @db.VarChar(80)
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  payments Payment[]
+
+  @@unique([parentOrderId, installmentNumber])
+  @@index([creditAccountId, status])
+  @@index([status, dueDate])
+  @@map("installment_schedules")
+}
+
+// ============================================================================
+// 7. DISPUTES & CUSTOMER SUPPORT
+// ============================================================================
+
+enum DisputeReason {
+  WRONG_ITEM
+  DAMAGED
+  NOT_AS_DESCRIBED
+  NOT_DELIVERED
+  COUNTERFEIT
+}
+
+enum DisputeStatus {
+  OPEN
+  VENDOR_RESPONDED
+  UNDER_ARBITRATION
+  RESOLVED_BUYER_FAVOR
+  RESOLVED_VENDOR_FAVOR
+  CANCELLED
+}
+
+/// What the vendor answered to a dispute (Phase 9).
+enum DisputeVendorAction {
+  ACCEPT_RETURN
+  REJECT_WITH_DEFENSE
+}
+
+/// Entries of a dispute's append-only timeline (Phase 9).
+enum DisputeEventType {
+  OPENED
+  EVIDENCE_ADDED
+  VENDOR_ACCEPTED_RETURN
+  VENDOR_DEFENDED
+  ARBITRATED_BUYER_FAVOR
+  ARBITRATED_VENDOR_FAVOR
+  CANCELLED_BY_CUSTOMER
+  REFUND_NOTICE_SENT
+  REFUND_NOTICE_FAILED
+}
+
+/// Complaint raised by a customer about one vendor's slice of an order.
+/// Disputes live as long as the sub-order they belong to. At most one dispute
+/// per sub-order is active (OPEN / VENDOR_RESPONDED / UNDER_ARBITRATION) —
+/// enforced by a partial unique index (migration phase9_disputes).
+///
+/// Escrow freeze (Phase 9): on opening, the package's earnings move into the
+/// vendor wallet's DISPUTE_HOLD bucket — from PENDING if not delivered yet, or
+/// from WITHDRAWABLE (as much as is there) if already delivered. `holdSource`,
+/// `holdAmount` and `holdShortfall` record exactly what was frozen, so the
+/// resolution moves back or refunds precisely that amount.
+model Dispute {
+  id                      String               @id @default(uuid()) @db.Uuid
+  subOrderId              String               @map("sub_order_id") @db.Uuid
+  subOrder                SubOrder             @relation(fields: [subOrderId], references: [id], onDelete: Cascade)
+  /// Store the dispute is against (denormalised from the sub-order for the vendor panel).
+  vendorId                String               @map("vendor_id") @db.Uuid
+  vendor                  Vendor               @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  raisedByUserId          String               @map("raised_by_user_id") @db.Uuid
+  raisedBy                User                 @relation(fields: [raisedByUserId], references: [id], onDelete: Restrict)
+  reason                  DisputeReason
+  description             String               @db.Text
+  status                  DisputeStatus        @default(OPEN)
+  /// Package status when the dispute was opened (PROCESSING / SHIPPED / DELIVERED).
+  subOrderStatusAtOpen    SubOrderStatus       @map("sub_order_status_at_open")
+  /// Bucket the frozen earnings came from: PENDING or WITHDRAWABLE; null when nothing could be frozen.
+  holdSource              WalletBalanceBucket? @map("hold_source")
+  holdAmount              Decimal              @default(0) @map("hold_amount") @db.Decimal(15, 2)
+  /// Earnings that could not be frozen because the vendor had already withdrawn them.
+  holdShortfall           Decimal              @default(0) @map("hold_shortfall") @db.Decimal(15, 2)
+  vendorAction            DisputeVendorAction? @map("vendor_action")
+  vendorDefenseNotes      String?              @map("vendor_defense_notes") @db.Text
+  vendorRespondedAt       DateTime?            @map("vendor_responded_at") @db.Timestamptz(3)
+  vendorRespondedByUserId String?              @map("vendor_responded_by_user_id") @db.Uuid
+  vendorRespondedBy       User?                @relation("DisputeVendorResponder", fields: [vendorRespondedByUserId], references: [id], onDelete: SetNull)
+  resolutionNotes         String?              @map("resolution_notes") @db.Text
+  resolvedAt              DateTime?            @map("resolved_at") @db.Timestamptz(3)
+  resolvedByUserId        String?              @map("resolved_by_user_id") @db.Uuid
+  resolvedBy              User?                @relation("DisputeResolver", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
+  /// Buyer-favour only: whether the goods came back (drives restocking of shipped packages).
+  itemReturned            Boolean?             @map("item_returned")
+  restocked               Boolean              @default(false)
+  /// Buyer-favour only: amount owed back to the customer (package items + shipping).
+  refundAmount            Decimal?             @map("refund_amount") @db.Decimal(15, 2)
+  /// Buyer-favour only: vendor earnings that could not be recovered from the wallet (vendor debt).
+  refundUnrecoveredAmount Decimal              @default(0) @map("refund_unrecovered_amount") @db.Decimal(15, 2)
+  cancelledAt             DateTime?            @map("cancelled_at") @db.Timestamptz(3)
+  createdAt               DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt               DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  evidence           DisputeEvidence[]
+  events             DisputeEvent[]
+  walletTransactions WalletTransaction[]
+
+  @@index([subOrderId])
+  @@index([status, createdAt])
+  @@index([raisedByUserId, createdAt])
+  @@index([vendorId, status, createdAt])
+  @@map("disputes")
+}
+
+/// Uploaded proof for a dispute (photo, invoice, chat export). The uploader is
+/// recorded separately from the raiser because staff and vendors may add files.
+/// Since Phase 9 every row references the uploader's own media asset.
+model DisputeEvidence {
+  id               String      @id @default(uuid()) @db.Uuid
+  disputeId        String      @map("dispute_id") @db.Uuid
+  dispute          Dispute     @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  uploadedByUserId String      @map("uploaded_by_user_id") @db.Uuid
+  uploadedBy       User        @relation(fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+  mediaAssetId     String?     @map("media_asset_id") @db.Uuid
+  mediaAsset       MediaAsset? @relation(fields: [mediaAssetId], references: [id], onDelete: SetNull)
+  fileUrl          String      @map("file_url") @db.VarChar(512)
+  fileType         String?     @map("file_type") @db.VarChar(40)
+  caption          String?     @db.VarChar(255)
+  createdAt        DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([disputeId, mediaAssetId])
+  @@index([disputeId, createdAt])
+  @@index([uploadedByUserId])
+  @@index([mediaAssetId])
+  @@map("dispute_evidence")
+}
+
+/// Append-only timeline of a dispute: who did what, when, and the status change.
+model DisputeEvent {
+  id          String           @id @default(uuid()) @db.Uuid
+  disputeId   String           @map("dispute_id") @db.Uuid
+  dispute     Dispute          @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  type        DisputeEventType
+  actorUserId String?          @map("actor_user_id") @db.Uuid
+  actorUser   User?            @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  /// CUSTOMER / VENDOR / STAFF / SYSTEM.
+  actorRole   String           @map("actor_role") @db.VarChar(20)
+  fromStatus  DisputeStatus?   @map("from_status")
+  toStatus    DisputeStatus?   @map("to_status")
+  note        String?          @db.VarChar(1000)
+  data        Json?
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([disputeId, createdAt])
+  @@map("dispute_events")
+}
+
+// ============================================================================
+// PLATFORM CONFIGURATION (Phase 1)
+// ============================================================================
+
+enum ConfigValueType {
+  STRING
+  NUMBER
+  BOOLEAN
+  JSON
+}
+
+/// Key/value platform configuration. `key` is the stable identifier consumed by
+/// application code; rows are upserted by the seed and never invented at runtime.
+model SystemConfig {
+  id          String          @id @default(uuid()) @db.Uuid
+  key         String          @unique @db.VarChar(120)
+  value       String          @db.Text
+  valueType   ConfigValueType @default(STRING) @map("value_type")
+  description String?         @db.VarChar(255)
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("system_configs")
+}
+
+// ─── Support: contact form (Phase 0 trust layer) ─────────────────────────────
+
+enum ContactMessageTopic {
+  ORDER
+  PAYMENT
+  BNPL
+  RETURN
+  VENDOR
+  TECHNICAL
+  OTHER
+}
+
+enum ContactMessageStatus {
+  NEW
+  IN_PROGRESS
+  RESOLVED
+}
+
+/// Message sent through the public contact form (`/contact`). Anyone may send
+/// one (rate-limited per IP and per mobile); a signed-in sender is linked via
+/// `userId`. Support staff work the queue in `/admin/support`.
+model ContactMessage {
+  id              String               @id @default(uuid()) @db.Uuid
+  fullName        String               @map("full_name") @db.VarChar(120)
+  mobile          String               @db.VarChar(15)
+  email           String?              @db.VarChar(254)
+  topic           ContactMessageTopic
+  subject         String               @db.VarChar(150)
+  message         String               @db.Text
+  status          ContactMessageStatus @default(NEW)
+  userId          String?              @map("user_id") @db.Uuid
+  ipAddress       String?              @map("ip_address") @db.VarChar(45)
+  userAgent       String?              @map("user_agent") @db.VarChar(255)
+  staffNote       String?              @map("staff_note") @db.Text
+  handledByUserId String?              @map("handled_by_user_id") @db.Uuid
+  handledAt       DateTime?            @map("handled_at") @db.Timestamptz(3)
+  createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user      User? @relation("ContactMessageSender", fields: [userId], references: [id], onDelete: SetNull)
+  handledBy User? @relation("ContactMessageHandler", fields: [handledByUserId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([mobile, createdAt])
+  @@index([userId])
+  @@map("contact_messages")
+}

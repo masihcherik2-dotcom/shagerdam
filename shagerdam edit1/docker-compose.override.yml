@@ -1,0 +1,33 @@
+# ============================================================================
+# Shopino — DEVELOPMENT OVERRIDE  (never used in production / CI)
+# ----------------------------------------------------------------------------
+# Compose automatically merges this file when it is named
+# `docker-compose.override.yml` and lives next to `docker-compose.yml`, so a
+# plain `docker compose up -d` gives you the development setup.
+#
+# Production and CI MUST pin the base file explicitly, otherwise they would
+# silently pick up development persistence:
+#
+#     docker compose -f docker-compose.yml up -d      (see `pnpm infra:up:prod`)
+#
+# What changes here (decision: Strategy B — dedicated development mount):
+#   named volumes  →  bind mounts under ./.docker-data/
+# so database content survives container removal *and* stays visible in the
+# repository workspace, while the base file keeps production semantics.
+#
+# Before the first start, run `pnpm infra:prepare` (or `pnpm infra:up`, which
+# does it for you). It creates the directories and — on Linux — gives them to
+# the container users (postgres 999, redis 999), because Docker creates missing
+# bind-mount directories as root and the database would refuse to initialise.
+# ============================================================================
+
+services:
+  postgres:
+    volumes:
+      # Same container path as the base file, so Compose replaces the named
+      # volume with this bind mount instead of stacking a second mount.
+      - ./.docker-data/postgres:/var/lib/postgresql/data
+
+  redis:
+    volumes:
+      - ./.docker-data/redis:/data

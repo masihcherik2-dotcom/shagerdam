@@ -1,0 +1,45 @@
+{
+  "name": "shopino",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shopino — multi-vendor marketplace with banking credit (BNPL) capabilities",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "clean": "turbo run clean",
+    "db:deploy": "turbo run db:deploy",
+    "db:generate": "turbo run db:generate",
+    "db:migrate": "turbo run db:migrate",
+    "db:push": "turbo run db:push",
+    "db:reset": "turbo run db:reset",
+    "db:seed": "turbo run db:seed",
+    "db:validate": "turbo run db:validate",
+    "dev": "turbo run dev",
+    "infra:down": "docker compose down",
+    "infra:logs": "docker compose logs -f --tail=100",
+    "infra:prepare": "bash scripts/prepare-dev-data-dirs.sh",
+    "infra:ps": "docker compose ps",
+    "infra:reset": "docker compose down -v",
+    "infra:up": "pnpm run infra:prepare && docker compose up -d",
+    "infra:up:prod": "docker compose -f docker-compose.yml up -d",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "test:e2e": "turbo run test:e2e",
+    "typecheck": "turbo run typecheck",
+    "verify:connections": "pnpm --filter @shopino/backend run verify:connections",
+    "verify:http": "pnpm --filter @shopino/backend run verify:http",
+    "verify:seed": "pnpm --filter @shopino/backend run verify:seed"
+  },
+  "devDependencies": {
+    "turbo": "^2.11.4",
+    "typescript": "5.9.3"
+  }
+}
