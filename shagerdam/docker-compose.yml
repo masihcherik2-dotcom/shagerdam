@@ -1,0 +1,103 @@
+# ============================================================================
+# Shopino — infrastructure services (PRODUCTION / CI STANDARD)
+# ----------------------------------------------------------------------------
+# PostgreSQL 16 (application database) and Redis 7 (cache / rate-limit / queue
+# backend) with durable named volumes.
+#
+#   Development :  pnpm infra:up        → this file + docker-compose.override.yml
+#                  (Compose auto-loads the override when it sits next to this file)
+#   Production  :  docker compose -f docker-compose.yml up -d      ← pin the file
+#   CI          :  docker compose -f docker-compose.yml up -d      ← pin the file
+#
+# Always pass `-f docker-compose.yml` explicitly outside development: the
+# override redirects persistence to ./.docker-data, which is a development-only
+# concern. See `pnpm infra:up:prod`.
+#
+# Credentials come from .env (see .env.example); nothing secret is stored here.
+# Missing variables fail the start instead of silently using a weak default.
+# ============================================================================
+
+name: shopino
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: shopino_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required in .env}
+      # Checksums detect silent on-disk corruption; set once, at initdb time.
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+      # Keep the cluster in a subdirectory so the volume root stays clean.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      # Bound to loopback: reachable by apps on this host, never exposed to the
+      # network. A deployed environment keeps it on a private network instead.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - shopino_network
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+
+  redis:
+    image: redis:7-alpine
+    container_name: shopino_redis
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required in .env}
+    # AUTH required on every connection; AOF keeps data across restarts.
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD:?REDIS_PASSWORD is required in .env}
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory
+      - 256mb
+      # noeviction: Redis is the future job-queue backend (BullMQ), where silent
+      # key eviction would corrupt in-flight work. Writes fail loudly instead,
+      # and the health endpoint surfaces the problem.
+      - --maxmemory-policy
+      - noeviction
+      - --save
+      - ""
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - shopino_network
+    deploy:
+      resources:
+        limits:
+          memory: 320M
+
+volumes:
+  # Logical names; Compose prefixes them with the project name (shopino_*).
+  postgres_data:
+  redis_data:
+
+networks:
+  shopino_network:
+    name: shopino_network
+    driver: bridge

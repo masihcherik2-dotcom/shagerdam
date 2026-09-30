@@ -1,0 +1,20 @@
+# Shopino — daily PostgreSQL backup (triggered by shopino-backup.timer).
+# Install: see docs/production-deployment-guide.md § Backups.
+[Unit]
+Description=Shopino PostgreSQL backup
+Wants=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/shopino/app
+Environment=SHOPINO_ENV_FILE=/opt/shopino/.env.production
+ExecStart=/opt/shopino/app/scripts/backup/backup-postgres.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+# Hardening: the job only needs the Docker socket and the backup directory.
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/var/backups/shopino

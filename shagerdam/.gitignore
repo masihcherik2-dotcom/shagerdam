@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# Tooling caches
+.turbo/
+coverage/
+.eslintcache
+
+# Local environment files — never committed. .env.example is the template.
+.env
+.env.*
+!.env.example
+
+# Local development data (Strategy B): PostgreSQL and Redis persist here in
+# development so the containers are disposable while the data is not.
+/.docker-data/
+
+# Local file-storage root for STORAGE_PROVIDER=local. In development this holds
+# real (test) KYC documents and store images, which must never be committed.
+apps/backend/uploads/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
