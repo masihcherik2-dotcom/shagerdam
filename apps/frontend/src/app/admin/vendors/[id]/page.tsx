@@ -1,6 +1,6 @@
 'use client';
 
-import { CheckCircle2, FileText, PackagePlus, XCircle } from 'lucide-react';
+import { CheckCircle2, FileText, PackagePlus, Rocket, XCircle } from 'lucide-react';
 import { useParams } from 'next/navigation';
 import { useState } from 'react';
 
@@ -77,6 +77,11 @@ export default function AdminVendorDetailPage() {
                   {vendor.status === 'APPROVED' && can(user?.role, 'manageVendors') ? (
                     <LinkButton href={`/admin/vendors/${vendor.id}/products/new`} icon={<PackagePlus className="size-4" />} data-testid="admin-vendor-add-product">
                       افزودن محصول (لینک دیجی‌کالا)
+                    </LinkButton>
+                  ) : null}
+                  {vendor.status === 'APPROVED' && can(user?.role, 'manageVendors') ? (
+                    <LinkButton href={`/admin/vendors/${vendor.id}/products/new?tab=bulk`} variant="success" icon={<Rocket className="size-4" />} data-testid="admin-vendor-bulk-import">
+                      درون‌ریزی کل فروشگاه
                     </LinkButton>
                   ) : null}
                   <LinkButton href="/admin/vendors" variant="secondary">

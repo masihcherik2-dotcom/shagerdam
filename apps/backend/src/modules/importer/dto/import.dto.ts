@@ -61,6 +61,25 @@ export class ExtractedSpecificationDto {
   value!: string;
 }
 
+export class ExtractedOfferDto {
+  @ApiProperty({ example: 18500000, description: 'Selling price in the source unit (see currency).' })
+  amount!: number;
+
+  @ApiProperty({ example: 21000000, nullable: true, type: Number, description: 'Original (strike-through) price, same unit.' })
+  oldAmount!: number | null;
+
+  @ApiProperty({
+    example: 'IRT',
+    nullable: true,
+    type: String,
+    description: 'IRR (rial), IRT (toman), IRHT (thousand toman), another ISO code as published, or null when the page names none.',
+  })
+  currency!: string | null;
+
+  @ApiProperty({ example: true, nullable: true, type: Boolean })
+  inStock!: boolean | null;
+}
+
 export class ExtractSpecResponseDto {
   @ApiProperty({ enum: ['DIGIKALA', 'GENERIC'], example: 'DIGIKALA' })
   source!: 'DIGIKALA' | 'GENERIC';
@@ -106,6 +125,9 @@ export class ExtractSpecResponseDto {
 
   @ApiProperty({ type: [String], description: 'Absolute image URLs, best available resolution, primary image first.' })
   imageUrls!: string[];
+
+  @ApiProperty({ type: () => ExtractedOfferDto, nullable: true, description: 'Price and availability as published by the page (source unit), or null.' })
+  offer!: ExtractedOfferDto | null;
 }
 
 export class IngestedImageDto {

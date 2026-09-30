@@ -15,7 +15,8 @@ export type ImportErrorCode =
   | 'UPSTREAM_STATUS'
   | 'UNSUPPORTED_CONTENT'
   | 'NOT_A_PRODUCT'
-  | 'NOT_FOUND';
+  | 'NOT_FOUND'
+  | 'NO_PRODUCTS_FOUND';
 
 export class ImportError extends Error {
   constructor(
@@ -35,6 +36,7 @@ const STATUS: Record<ImportErrorCode, HttpStatus> = {
   UNSUPPORTED_CONTENT: HttpStatus.UNPROCESSABLE_ENTITY,
   NOT_A_PRODUCT: HttpStatus.UNPROCESSABLE_ENTITY,
   NOT_FOUND: HttpStatus.UNPROCESSABLE_ENTITY,
+  NO_PRODUCTS_FOUND: HttpStatus.UNPROCESSABLE_ENTITY,
   TOO_MANY_REDIRECTS: HttpStatus.BAD_GATEWAY,
   NETWORK: HttpStatus.BAD_GATEWAY,
   UPSTREAM_STATUS: HttpStatus.BAD_GATEWAY,

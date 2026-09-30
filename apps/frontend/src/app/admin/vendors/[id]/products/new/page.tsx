@@ -1,8 +1,10 @@
 'use client';
 
 import { useParams } from 'next/navigation';
+import { use } from 'react';
 
 import { useSession } from '@/components/providers/session-provider';
+import { adminBulkEndpoints } from '@/components/vendor/bulk-import-panel';
 import { adminImportEndpoints } from '@/components/vendor/product-import-panel';
 import { NewProductForm } from '@/components/vendor/new-product-form';
 import { AsyncView, EmptyState, Skeleton } from '@/components/ui/states';
@@ -16,8 +18,9 @@ import { useApi } from '@/lib/hooks/use-api';
  * belongs to the store, imported images to the owner's media library, and the
  * audit trail names the administrator.
  */
-export default function AdminVendorNewProductPage() {
+export default function AdminVendorNewProductPage({ searchParams }: { searchParams: Promise<{ tab?: string | string[] }> }) {
   const { id } = useParams<{ id: string }>();
+  const { tab } = use(searchParams);
   const { user } = useSession();
   const allowed = can(user?.role, 'manageVendors');
   const state = useApi<VendorAdminDetail>(allowed ? `/admin/vendors/${id}` : null);
@@ -38,6 +41,12 @@ export default function AdminVendorNewProductPage() {
             imageUpload={false}
             cancelHref={`/admin/vendors/${vendor.id}`}
             savedHref={(product) => (product.isPublished ? `/products/${encodeURIComponent(product.slug)}` : `/admin/vendors/${vendor.id}`)}
+            initialTab={tab === 'bulk' ? 'bulk' : 'single'}
+            bulk={{
+              endpoints: adminBulkEndpoints(vendor.id),
+              staff: true,
+              productLink: (product) => (product.isPublished ? { href: `/products/${encodeURIComponent(product.slug)}`, label: 'مشاهده در فروشگاه' } : null),
+            }}
           />
         )
       }

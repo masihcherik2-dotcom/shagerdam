@@ -8,6 +8,9 @@ import { DIGIKALA_API_ORIGIN, DIGIKALA_PUBLIC_API_ORIGIN, DigikalaExtractor } fr
 import { GenericSchemaOrgExtractor } from './extractors/generic-schema.extractor';
 import { IMPORT_NETWORK_POLICY, PUBLIC_INTERNET_POLICY } from './net/address-policy';
 import { SafeHttpClient } from './net/safe-http-client';
+import { BulkImportService } from './bulk/bulk-import.service';
+import { BulkJobStore } from './bulk/bulk-job.store';
+import { StoreCrawlerService } from './crawler/store-crawler.service';
 import { ProductImporterService } from './product-importer.service';
 import { VendorProductImportController } from './vendor-product-import.controller';
 
@@ -31,6 +34,9 @@ import { VendorProductImportController } from './vendor-product-import.controlle
     GenericSchemaOrgExtractor,
     DigikalaExtractor,
     ProductImporterService,
+    StoreCrawlerService,
+    BulkJobStore,
+    BulkImportService,
   ],
 })
 export class ImporterModule {}

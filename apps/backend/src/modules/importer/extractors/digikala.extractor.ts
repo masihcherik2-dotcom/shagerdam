@@ -7,6 +7,7 @@ import {
   type ExtractedProduct,
   type ExtractedSpecification,
 } from './extracted-product';
+import type { ExtractedOffer } from './offer';
 import { GenericSchemaOrgExtractor } from './generic-schema.extractor';
 
 /**
@@ -48,6 +49,10 @@ interface DkProduct {
   title_fa?: string | null;
   title_en?: string | null;
   is_inactive?: boolean;
+  /** `marketable` when it can be bought; `out_of_stock`, `stop_production`, … otherwise. */
+  status?: string | null;
+  /** The buy-box variant; prices are in rials. Absent for unavailable products. */
+  default_variant?: { price?: { selling_price?: number | null; rrp_price?: number | null } | null } | unknown[] | null;
   brand?: { title_fa?: string | null; title_en?: string | null; is_miscellaneous?: boolean } | null;
   category?: { title_fa?: string | null } | null;
   breadcrumb?: Array<{ title?: string | null; url?: { uri?: string | null } | null }> | null;
@@ -157,7 +162,26 @@ export function parseDigikalaProduct(document: DigikalaApiResponse, productId: s
       categoryCandidates: [...(category ? [category] : []), ...crumbs],
       specifications,
       imageUrls,
+      offer: digikalaOffer(product),
     }),
+  };
+}
+
+/**
+ * Buy-box price of a Digikala product (rials). Digikala sends `default_variant`
+ * as an empty array when nothing is for sale; such products have no offer.
+ */
+export function digikalaOffer(product: DkProduct): ExtractedOffer | null {
+  const variant = product.default_variant;
+  if (!variant || Array.isArray(variant)) return null;
+  const selling = variant.price?.selling_price;
+  if (typeof selling !== 'number' || !Number.isFinite(selling) || selling <= 0) return null;
+  const rrp = variant.price?.rrp_price;
+  return {
+    amount: selling,
+    oldAmount: typeof rrp === 'number' && rrp > selling ? rrp : null,
+    currency: 'IRR',
+    inStock: product.status === undefined || product.status === null ? null : product.status === 'marketable',
   };
 }
 

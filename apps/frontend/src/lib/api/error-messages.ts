@@ -51,9 +51,15 @@ const CODE_MESSAGES: Record<string, string | ((details: Record<string, unknown>)
   GATEWAY_UNREACHABLE: 'ارتباط با درگاه پرداخت برقرار نشد.',
   HYBRID_NOT_REQUIRED: 'اعتبار شما برای کل مبلغ کافی است؛ «پرداخت اعتباری» را انتخاب کنید.',
   IBAN_MISMATCH: 'شبای مقصد باید همان شبای ثبت‌شده در پروفایل فروشگاه باشد.',
+  BULK_BUSY: 'واردکنندهٔ گروهی هم‌اکنون مشغول فروشگاه‌های دیگر است؛ چند دقیقهٔ دیگر دوباره تلاش کنید.',
+  BULK_INVALID_URL: (details) => `یکی از لینک‌ها قابل درون‌ریزی نیست${typeof details.message === 'string' ? ` (${details.message})` : ''}.`,
+  BULK_JOB_NOT_RUNNING: 'این درون‌ریزی دیگر در حال اجرا نیست.',
+  BULK_JOB_RUNNING: 'یک درون‌ریزی گروهی برای این فروشگاه در حال اجراست؛ صبر کنید تمام شود یا آن را متوقف کنید.',
+  BULK_NOTHING_TO_RETRY: 'موردی برای تلاش دوباره نمانده است.',
   IMPORT_BLOCKED_TARGET: 'این نشانی به شبکهٔ داخلی یا یک نشانی غیرعمومی اشاره می‌کند و قابل دریافت نیست.',
   IMPORT_INVALID_URL: 'لینک معتبر نیست؛ نشانی کامل صفحهٔ کالا را با http:// یا https:// وارد کنید.',
   IMPORT_NETWORK: 'ارتباط با سایت مبدأ برقرار نشد.',
+  IMPORT_NO_PRODUCTS_FOUND: 'در نقشهٔ سایت (sitemap) این فروشگاه صفحهٔ محصولی پیدا نشد. اگر سایت از سرور ما باز نمی‌شود، متن نقشهٔ سایت یا فهرست لینک‌ها را در کادر «چسباندن» وارد کنید.',
   IMPORT_NOT_A_PRODUCT: 'در این صفحه اطلاعات ساخت‌یافتهٔ کالا پیدا نشد؛ لینک صفحهٔ خود کالا را وارد کنید.',
   IMPORT_NOT_FOUND: 'این کالا در سایت مبدأ پیدا نشد یا دیگر فعال نیست.',
   IMPORT_TIMEOUT: 'سایت مبدأ در ۱۰ ثانیه پاسخ نداد؛ کمی بعد دوباره تلاش کنید.',
@@ -113,4 +119,11 @@ export function localizeErrorMessage(status: number, code: string | undefined, b
   const generic = STATUS_MESSAGES[status] ?? (status >= 500 ? STATUS_MESSAGES[500] : `درخواست با خطای ${status} رد شد.`);
   // Validation details stay visible (they name the offending field) for 400/422.
   return backendMessage && (status === 400 || status === 422) ? `${generic} (${backendMessage})` : (generic ?? `درخواست با خطای ${status} رد شد.`);
+}
+
+/** Persian text of a known machine code (e.g. a bulk-import item's `IMPORT_TIMEOUT`), or `undefined`. */
+export function messageForCode(code: string, details: Record<string, unknown> = {}): string | undefined {
+  const mapped = CODE_MESSAGES[code];
+  if (mapped === undefined) return undefined;
+  return typeof mapped === 'function' ? mapped(details) : mapped;
 }

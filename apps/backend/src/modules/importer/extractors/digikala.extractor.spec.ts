@@ -258,6 +258,7 @@ describe('DigikalaExtractor', () => {
       categoryCandidates: [],
       specifications: [],
       imageUrls: [],
+      offer: null,
     };
     const { extractor } = build([new ImportError('TIMEOUT', 'slow')], pageDraft);
     await expect(extractor.extract(url)).resolves.toMatchObject({ title: 'from page', source: 'DIGIKALA', sourceProductId: 'dkp-13196935' });

@@ -12,6 +12,7 @@ import {
   type ExtractedSpecification,
   type ExtractionStrategy,
 } from './extracted-product';
+import { mergeOffers, offerFromJsonLd, offerFromMicrodata, offerFromOpenGraph, offerFromWooCommerce } from './offer';
 
 /** Product pages rarely exceed 1–2 MB of HTML; anything above 5 MB is not worth parsing. */
 const MAX_HTML_BYTES = 5 * 1024 * 1024;
@@ -222,10 +223,14 @@ function itemPropValue(element: HTMLElement): string | undefined {
   return text.trim().length > 0 ? text.trim() : undefined;
 }
 
-function fromMicrodata(root: HTMLElement, base: URL): PartialDraft | null {
-  const scope = root
+function microdataScope(root: HTMLElement): HTMLElement | undefined {
+  return root
     .querySelectorAll('[itemscope][itemtype]')
     .find((element) => /schema\.org\/(Product|ProductGroup|IndividualProduct)\b/i.test(element.getAttribute('itemtype') ?? ''));
+}
+
+function fromMicrodata(root: HTMLElement, base: URL): PartialDraft | null {
+  const scope = microdataScope(root);
   if (!scope) return null;
 
   const first = (prop: string): HTMLElement | undefined => scope.querySelector(`[itemprop="${prop}"]`) ?? undefined;
@@ -467,6 +472,14 @@ export function parseProductHtml(html: string, pageUrl: URL): ExtractedProduct {
   }
   const strategies = parts.filter((part) => contributing.has(part)).map((part) => part.strategy!);
 
+  const scope = microdataScope(root);
+  const offer = mergeOffers([
+    offerFromWooCommerce(root),
+    productNode ? offerFromJsonLd(productNode) : null,
+    scope ? offerFromMicrodata(scope) : null,
+    offerFromOpenGraph(root),
+  ]);
+
   return finalizeProduct({
     source: 'GENERIC',
     strategies,
@@ -482,6 +495,7 @@ export function parseProductHtml(html: string, pageUrl: URL): ExtractedProduct {
     categoryCandidates: unique([...(category ? [category] : []), ...breadcrumbs]),
     specifications: parts.flatMap((part) => part.specifications),
     imageUrls: unique(parts.flatMap((part) => part.images)),
+    offer,
   });
 }
 

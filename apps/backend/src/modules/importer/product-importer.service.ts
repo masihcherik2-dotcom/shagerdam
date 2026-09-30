@@ -66,7 +66,7 @@ export class ProductImporterService {
 
     let product: ExtractedProduct;
     try {
-      product = this.digikala.matches(url) ? await this.digikala.extract(url) : await this.generic.extract(url);
+      product = await this.extractProduct(url);
     } catch (error) {
       throw this.toHttp(error, url);
     }
@@ -90,7 +90,22 @@ export class ProductImporterService {
       suggestedCategoryId,
       specifications: product.specifications,
       imageUrls: product.imageUrls,
+      offer: product.offer,
     };
+  }
+
+  /**
+   * Reads one page with the right strategy (Digikala API or generic structured
+   * data). No quota and no store check — callers (the single-page endpoint
+   * above, the bulk importer) enforce their own. Throws {@link ImportError}.
+   */
+  extractProduct(url: URL): Promise<ExtractedProduct> {
+    return this.digikala.matches(url) ? this.digikala.extract(url) : this.generic.extract(url);
+  }
+
+  /** Validates a URL for the importer without fetching it; throws {@link ImportError}. */
+  validateUrl(raw: string): URL {
+    return this.http.validate(raw);
   }
 
   /**
@@ -126,7 +141,8 @@ export class ProductImporterService {
     return { items, failures };
   }
 
-  private async ingestOne(userId: string, sourceUrl: string, url: URL): Promise<IngestedImageDto | FailedImageDto> {
+  /** Downloads one (already validated) image into `userId`'s media library; failures are returned, not thrown. */
+  async ingestOne(userId: string, sourceUrl: string, url: URL): Promise<IngestedImageDto | FailedImageDto> {
     try {
       const response = await this.http.fetch(url, { accept: IMAGE_ACCEPT, maxBytes: this.media.limits.imageBytes });
       if (response.status < 200 || response.status >= 300) {
@@ -157,7 +173,7 @@ export class ProductImporterService {
   }
 
   /** First active, visible local category whose name equals a source category (most specific first). */
-  private async matchCategory(candidates: string[]): Promise<string | null> {
+  async matchCategory(candidates: string[]): Promise<string | null> {
     if (candidates.length === 0) {
       return null;
     }
@@ -201,7 +217,7 @@ export class ProductImporterService {
     return error;
   }
 
-  private async requireApprovedStore(userId: string): Promise<void> {
+  async requireApprovedStore(userId: string): Promise<void> {
     const store = await this.prisma.vendor.findUnique({ where: { userId }, select: { status: true } });
     if (store === null || store.status !== VendorStatus.APPROVED) {
       throw new ForbiddenException('Only an approved store can import products');

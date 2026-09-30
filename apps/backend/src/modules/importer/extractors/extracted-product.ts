@@ -5,6 +5,7 @@ import {
   SPECIFICATION_VALUE_MAX_LENGTH,
 } from '../../products/product-rules';
 import { normalizePersianParagraphs, normalizePersianText } from '../../products/catalog-text';
+import type { ExtractedOffer } from './offer';
 
 export type ImportSource = 'DIGIKALA' | 'GENERIC';
 
@@ -46,6 +47,8 @@ export interface ExtractedProduct {
   specifications: ExtractedSpecification[];
   /** Absolute http(s) image URLs, best quality available, primary first. */
   imageUrls: string[];
+  /** Price/availability as published by the page, or null when it shows none. */
+  offer: ExtractedOffer | null;
 }
 
 // Limits mirror the product DTO so a draft can always be saved as-is.

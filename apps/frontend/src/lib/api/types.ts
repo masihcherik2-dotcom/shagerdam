@@ -1270,3 +1270,73 @@ export interface AdminContactMessage {
 export interface AdminContactMessagePage extends Page<AdminContactMessage> {
   counts: Record<ContactMessageStatus, number>;
 }
+
+// ── Whole-store import (crawl-store + bulk-extract background jobs) ──────────
+
+export type BulkPriceUnit = 'AUTO' | 'IRR' | 'IRT';
+export type BulkJobStatus = 'RUNNING' | 'COMPLETED' | 'CANCELLED' | 'INTERRUPTED';
+export type BulkItemStatus = 'PENDING' | 'PROCESSING' | 'SUCCEEDED' | 'SKIPPED' | 'NEEDS_REVIEW' | 'FAILED';
+export type BulkItemNote = 'NO_IMAGE' | 'SOME_IMAGES_FAILED' | 'OUT_OF_STOCK';
+
+export interface CrawlStoreResponse {
+  storeUrl: string;
+  totalFound: number;
+  productUrls: string[];
+  sitemapsScanned: string[];
+  warnings: string[];
+}
+
+export interface BulkOptions {
+  autoPublish: boolean;
+  priceUnit: BulkPriceUnit;
+  defaultStock: number;
+  defaultCategoryId: string | null;
+}
+
+export interface BulkExtractResponse {
+  jobId: string;
+  totalProducts: number;
+}
+
+export interface BulkItem {
+  index: number;
+  url: string;
+  status: BulkItemStatus;
+  attempts: number;
+  code: string | null;
+  message: string | null;
+  notes: BulkItemNote[];
+  title: string | null;
+  imageUrl: string | null;
+  /** Selling price in IRR. */
+  price: number | null;
+  product: { id: string; slug: string; isPublished: boolean } | null;
+  updatedAt: string;
+}
+
+export interface BulkJobCounts {
+  pending: number;
+  processing: number;
+  succeeded: number;
+  skipped: number;
+  needsReview: number;
+  failed: number;
+}
+
+export interface BulkJob {
+  id: string;
+  vendorId: string;
+  staff: boolean;
+  storeUrl: string | null;
+  options: BulkOptions;
+  status: BulkJobStatus;
+  total: number;
+  runs: number;
+  createdAt: string;
+  updatedAt: string;
+  finishedAt: string | null;
+  counts: BulkJobCounts;
+  processed: number;
+  progressPercent: number;
+  items: BulkItem[];
+}

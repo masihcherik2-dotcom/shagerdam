@@ -40,6 +40,8 @@ export function adminImportEndpoints(vendorId: string): ImportEndpoints {
 
 interface ProductImportPanelProps {
   endpoints?: ImportEndpoints;
+  /** Pre-filled product link (e.g. an item of a whole-store import that needs review). */
+  initialUrl?: string;
   /** Free gallery slots (the product limit minus images already in the form). */
   imageSlots: number;
   /** The form already has content that applying the draft would overwrite. */
@@ -63,8 +65,8 @@ const fileName = (url: string): string => {
  * the chosen images are copied into our media storage (ingest-images) and the
  * form is filled. The vendor then only adds price, stock and variants.
  */
-export function ProductImportPanel({ endpoints = VENDOR_IMPORT_ENDPOINTS, imageSlots, hasExistingData, onApply }: ProductImportPanelProps) {
-  const [url, setUrl] = useState('');
+export function ProductImportPanel({ endpoints = VENDOR_IMPORT_ENDPOINTS, initialUrl = '', imageSlots, hasExistingData, onApply }: ProductImportPanelProps) {
+  const [url, setUrl] = useState(initialUrl);
   const [urlError, setUrlError] = useState<string | null>(null);
   const [draft, setDraft] = useState<ImportedProductDraft | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());

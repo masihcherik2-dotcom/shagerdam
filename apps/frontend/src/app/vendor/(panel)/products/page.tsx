@@ -1,6 +1,6 @@
 'use client';
 
-import { Eye, EyeOff, Package, Pencil, Plus, Search } from 'lucide-react';
+import { Eye, EyeOff, Package, Pencil, Plus, Rocket, Search } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useState } from 'react';
@@ -51,9 +51,14 @@ export default function VendorProductsPage() {
       <PageHeader
         title="محصولات"
         action={
-          <LinkButton href="/vendor/products/new" icon={<Plus className="size-4" />}>
-            افزودن محصول
-          </LinkButton>
+          <div className="flex flex-wrap gap-2">
+            <LinkButton href="/vendor/products/new?tab=bulk" variant="success" icon={<Rocket className="size-4" />} data-testid="vendor-bulk-import">
+              درون‌ریزی کل فروشگاه
+            </LinkButton>
+            <LinkButton href="/vendor/products/new" icon={<Plus className="size-4" />}>
+              افزودن محصول
+            </LinkButton>
+          </div>
         }
       />
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
