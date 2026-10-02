@@ -101,6 +101,23 @@ export function clearedGoogleCookies(secure: boolean): CookieSpec[] {
   return [spec(GOOGLE_STATE_COOKIE, '', 0, secure, GOOGLE_COOKIE_PATH), spec(GOOGLE_SIGNUP_COOKIE, '', 0, secure, GOOGLE_COOKIE_PATH)];
 }
 
+/**
+ * Sign-in with an e-mailed code: after the e-mail code is accepted for an
+ * address without a verified account, the backend hands out a ticket for the
+ * one-time mobile check. It stays in this httpOnly cookie scoped to the BFF's
+ * e-mail routes — browser JavaScript never sees it.
+ */
+export const EMAIL_SIGNUP_COOKIE = 'shopino_email_signup';
+const EMAIL_COOKIE_PATH = '/api/session/email-otp';
+
+export function emailSignupCookie(ticket: string, maxAge: number, secure: boolean): CookieSpec {
+  return spec(EMAIL_SIGNUP_COOKIE, ticket, maxAge, secure, EMAIL_COOKIE_PATH);
+}
+
+export function clearedEmailSignupCookie(secure: boolean): CookieSpec {
+  return spec(EMAIL_SIGNUP_COOKIE, '', 0, secure, EMAIL_COOKIE_PATH);
+}
+
 /** Cookies to write after a login or a refresh. */
 export function sessionCookies(tokens: Pick<AuthTokens, 'accessToken' | 'refreshToken' | 'expiresIn' | 'refreshExpiresIn'>, secure: boolean): CookieSpec[] {
   return [spec(ACCESS_COOKIE, tokens.accessToken, tokens.expiresIn, secure), spec(REFRESH_COOKIE, tokens.refreshToken, tokens.refreshExpiresIn, secure)];

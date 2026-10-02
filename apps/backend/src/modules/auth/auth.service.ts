@@ -130,7 +130,15 @@ export class AuthService {
    * and the mobile binding step of Google sign-in. Does not clear the challenge.
    */
   async assertOtpMatches(mobile: string, code: string, context: RequestContext): Promise<void> {
-    const result = await this.otp.verify(mobile, code);
+    await this.assertCodeResult(await this.otp.verify(mobile, code), () => this.otp.lockRemainingSeconds(mobile), context);
+  }
+
+  /** {@link assertOtpMatches} for a code sent by e-mail. */
+  async assertEmailOtpMatches(email: string, code: string, context: RequestContext): Promise<void> {
+    await this.assertCodeResult(await this.otp.verifyEmail(email, code), () => this.otp.emailLockRemainingSeconds(email), context, 'address');
+  }
+
+  private async assertCodeResult(result: OtpVerifyResult, lockRemaining: () => Promise<number>, context: RequestContext, noun = 'number'): Promise<void> {
 
     switch (result) {
       case OtpVerifyResult.NotFound:
@@ -142,12 +150,9 @@ export class AuthService {
         throw new UnauthorizedException('Incorrect code.');
 
       case OtpVerifyResult.Exhausted: {
-        const retryAfter = await this.otp.lockRemainingSeconds(mobile);
+        const retryAfter = await lockRemaining();
         await this.recordFailedLogin(null, 'otp_attempts_exhausted', context);
-        throw new TooManyRequestsException(
-          'Too many incorrect codes. This number is temporarily locked.',
-          retryAfter,
-        );
+        throw new TooManyRequestsException(`Too many incorrect codes. This ${noun} is temporarily locked.`, retryAfter);
       }
 
       case OtpVerifyResult.Match:
@@ -161,7 +166,7 @@ export class AuthService {
    * records the login and writes the LOGIN audit row (the Google callback is a
    * GET, which the audit interceptor does not cover).
    */
-  async completeExternalLogin(user: PublicUser, method: 'google', context: RequestContext, detail: Record<string, unknown> = {}): Promise<AuthTokensResponseDto> {
+  async completeExternalLogin(user: PublicUser, method: 'google' | 'email_otp', context: RequestContext, detail: Record<string, unknown> = {}): Promise<AuthTokensResponseDto> {
     this.assertActive(user.isActive);
     const tokens = await this.tokens.issue(user, context);
     await this.users.touchLastLogin(user.id);

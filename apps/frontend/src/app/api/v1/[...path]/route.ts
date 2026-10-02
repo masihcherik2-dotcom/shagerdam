@@ -63,6 +63,14 @@ function isGoogleSessionPath(blockKey: string): boolean {
   return blockKey === 'auth/google' || (blockKey.startsWith('auth/google/') && blockKey !== 'auth/google/status');
 }
 
+/**
+ * E-mail code sign-in endpoints issue tokens or hold the signup ticket; only
+ * the BFF (/api/session/email-otp/*) calls them. `auth/email-otp/status` stays public.
+ */
+function isEmailOtpSessionPath(blockKey: string): boolean {
+  return blockKey === 'auth/email-otp' || (blockKey.startsWith('auth/email-otp/') && blockKey !== 'auth/email-otp/status');
+}
+
 type RouteContext = { params: Promise<{ path: string[] }> };
 
 async function forward(request: NextRequest, path: string, body: ArrayBuffer | undefined, accessToken: string | undefined): Promise<Response> {
@@ -96,7 +104,7 @@ async function handle(request: NextRequest, context: RouteContext): Promise<Resp
   // Compared case-insensitively and without trailing slashes so `HEALTH` or
   // `health/` cannot slip past to a router that treats them as the same route.
   const blockKey = path.toLowerCase().replace(/\/+$/, '');
-  if (BLOCKED_PATHS.has(blockKey) || isGoogleSessionPath(blockKey)) {
+  if (BLOCKED_PATHS.has(blockKey) || isGoogleSessionPath(blockKey) || isEmailOtpSessionPath(blockKey)) {
     return jsonResponse(404, { statusCode: 404, error: 'Not Found', message: BLOCKED_MESSAGES[blockKey] ?? 'Use /api/session for sign-in, refresh and sign-out.' });
   }
   const mutating = request.method !== 'GET' && request.method !== 'HEAD';

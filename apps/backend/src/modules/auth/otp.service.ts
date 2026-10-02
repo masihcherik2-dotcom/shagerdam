@@ -5,6 +5,7 @@ import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
 import type { EnvironmentVariables } from '../../config/env.validation';
 import { RedisService } from '../../infra/redis/redis.service';
 import { maskMobile, toE164 } from '../../common/validators/iranian-mobile';
+import { maskEmail, normalizeEmail } from '../../common/validators/email';
 
 const HOUR_SECONDS = 3_600;
 
@@ -18,9 +19,29 @@ export const OtpKeys = {
   lock: (mobile: string) => `auth:otp:lock:${mobile}`,
   /** Rolling hourly counter per number. */
   hourlyByMobile: (mobile: string) => `auth:otp:hourly:mobile:${mobile}`,
-  /** Rolling hourly counter per client IP. */
+  /** Rolling hourly counter per client IP (shared by mobile and e-mail codes). */
   hourlyByIp: (ip: string) => `auth:otp:hourly:ip:${ip}`,
+  /** Rolling hourly counter per e-mail address (keyed by its subject). */
+  hourlyByEmail: (subject: string) => `auth:otp:hourly:${subject}`,
 } as const;
+
+/**
+ * Redis identity of an e-mail address: `email:<sha256>`. Hashing keeps
+ * addresses out of key names (and `SCAN` output); it cannot collide with a
+ * mobile key, which always starts with `+98`.
+ */
+export function emailOtpSubject(email: string): string {
+  return `email:${createHash('sha256').update(email).digest('hex')}`;
+}
+
+/** What a challenge is for: a key in Redis plus how to name it in logs and messages. */
+interface OtpSubject {
+  id: string;
+  hourlyKey: string;
+  masked: string;
+  /** "number" / "address", used in the user-facing rate-limit messages. */
+  noun: string;
+}
 
 /**
  * Outcome of an attempted verification. `Mismatch` and `Exhausted` are separate
@@ -40,6 +61,12 @@ export enum OtpVerifyResult {
 
 export interface OtpChallenge {
   mobile: string;
+  expiresInSeconds: number;
+  attemptsAllowed: number;
+}
+
+export interface EmailOtpChallenge {
+  email: string;
   expiresInSeconds: number;
   attemptsAllowed: number;
 }
@@ -122,48 +149,46 @@ export class OtpService {
    */
   async createChallenge(mobile: string, purpose: string, clientIp: string | null): Promise<{ code: string; challenge: OtpChallenge }> {
     const normalized = this.normalize(mobile);
+    const code = await this.createFor(this.mobileSubject(normalized), purpose, clientIp);
+    return { code, challenge: { mobile: normalized, expiresInSeconds: this.ttlSeconds, attemptsAllowed: this.maxAttempts } };
+  }
 
-    await this.assertNotLocked(normalized);
+  /**
+   * Same as {@link createChallenge} for an e-mail address: identical cooldown,
+   * hourly quota, attempt budget and lock — counted separately from mobile
+   * numbers, except the per-IP quota, which both channels share.
+   */
+  async createEmailChallenge(email: string, purpose: string, clientIp: string | null): Promise<{ code: string; challenge: EmailOtpChallenge }> {
+    const normalized = this.normalizeEmailAddress(email);
+    const code = await this.createFor(this.emailSubject(normalized), purpose, clientIp);
+    return { code, challenge: { email: normalized, expiresInSeconds: this.ttlSeconds, attemptsAllowed: this.maxAttempts } };
+  }
+
+  private async createFor(subject: OtpSubject, purpose: string, clientIp: string | null): Promise<string> {
+    await this.assertNotLocked(subject);
 
     // The cooldown is the primary rule (one request per window) and is claimed
     // atomically, so two concurrent requests can never both generate a code.
-    const claimed = await this.redis.client.set(
-      OtpKeys.cooldown(normalized),
-      '1',
-      'EX',
-      this.cooldownSeconds,
-      'NX',
-    );
+    const claimed = await this.redis.client.set(OtpKeys.cooldown(subject.id), '1', 'EX', this.cooldownSeconds, 'NX');
     if (claimed === null) {
-      const retryAfter = await this.retryAfterSeconds(OtpKeys.cooldown(normalized), this.cooldownSeconds);
-      throw this.rateLimited(
-        `An OTP was requested recently. Try again in ${retryAfter} seconds.`,
-        retryAfter,
-      );
+      const retryAfter = await this.retryAfterSeconds(OtpKeys.cooldown(subject.id), this.cooldownSeconds);
+      throw this.rateLimited(`An OTP was requested recently. Try again in ${retryAfter} seconds.`, retryAfter);
     }
 
-    await this.assertWithinHourlyQuota(
-      OtpKeys.hourlyByMobile(normalized),
-      this.maxPerHourPerMobile,
-      'This number has requested too many codes in the last hour.',
-    );
+    await this.assertWithinHourlyQuota(subject.hourlyKey, this.maxPerHourPerMobile, `This ${subject.noun} has requested too many codes in the last hour.`);
     if (clientIp) {
-      await this.assertWithinHourlyQuota(
-        OtpKeys.hourlyByIp(clientIp),
-        this.maxPerHourPerIp,
-        'Too many OTP requests from this network in the last hour.',
-      );
+      await this.assertWithinHourlyQuota(OtpKeys.hourlyByIp(clientIp), this.maxPerHourPerIp, 'Too many OTP requests from this network in the last hour.');
     }
 
     const code = this.generateCode();
-    const key = OtpKeys.challenge(normalized);
+    const key = OtpKeys.challenge(subject.id);
 
     // A fresh request invalidates any previous code: only the newest one works.
     await this.redis.client
       .multi()
       .del(key)
       .hset(key, {
-        codeHash: this.hashCode(normalized, code),
+        codeHash: this.hashCode(subject.id, code),
         attempts: '0',
         purpose,
         createdAt: new Date().toISOString(),
@@ -171,12 +196,8 @@ export class OtpService {
       .expire(key, this.ttlSeconds)
       .exec();
 
-    this.logger.debug(`OTP challenge created for ${maskMobile(normalized)} (purpose: ${purpose})`);
-
-    return {
-      code,
-      challenge: { mobile: normalized, expiresInSeconds: this.ttlSeconds, attemptsAllowed: this.maxAttempts },
-    };
+    this.logger.debug(`OTP challenge created for ${subject.masked} (purpose: ${purpose})`);
+    return code;
   }
 
   /**
@@ -185,22 +206,28 @@ export class OtpService {
    * `OTP_LOCK_SECONDS`.
    */
   async verify(mobile: string, code: string): Promise<OtpVerifyResult> {
-    const normalized = this.normalize(mobile);
-    await this.assertNotLocked(normalized);
+    return this.verifyFor(this.mobileSubject(this.normalize(mobile)), code);
+  }
+
+  /** {@link verify} for an e-mailed code. */
+  async verifyEmail(email: string, code: string): Promise<OtpVerifyResult> {
+    return this.verifyFor(this.emailSubject(this.normalizeEmailAddress(email)), code);
+  }
+
+  private async verifyFor(subject: OtpSubject, code: string): Promise<OtpVerifyResult> {
+    await this.assertNotLocked(subject);
 
     const raw = (await this.redis.client.eval(
       this.verifyScript,
       1,
-      OtpKeys.challenge(normalized),
-      this.hashCode(normalized, code),
+      OtpKeys.challenge(subject.id),
+      this.hashCode(subject.id, code),
       String(this.maxAttempts),
     )) as number;
 
     if (raw === 2) {
-      await this.redis.client.set(OtpKeys.lock(normalized), '1', 'EX', this.lockSeconds);
-      this.logger.warn(
-        `OTP attempt budget exhausted for ${maskMobile(normalized)}; locked for ${this.lockSeconds}s`,
-      );
+      await this.redis.client.set(OtpKeys.lock(subject.id), '1', 'EX', this.lockSeconds);
+      this.logger.warn(`OTP attempt budget exhausted for ${subject.masked}; locked for ${this.lockSeconds}s`);
       return OtpVerifyResult.Exhausted;
     }
     if (raw === 0) {
@@ -229,6 +256,42 @@ export class OtpService {
     return this.retryAfterSeconds(OtpKeys.lock(this.normalize(mobile)), 0);
   }
 
+  /** Clears the code and lock of an address after a successful sign-in. */
+  async clearEmail(email: string): Promise<void> {
+    const id = emailOtpSubject(this.normalizeEmailAddress(email));
+    await this.redis.client.del(OtpKeys.challenge(id), OtpKeys.lock(id));
+  }
+
+  /**
+   * Undoes a challenge whose e-mail could not be sent: drops the code and the
+   * cooldown so the user can retry at once (the hourly quotas still count).
+   */
+  async releaseEmailChallenge(email: string): Promise<void> {
+    const id = emailOtpSubject(this.normalizeEmailAddress(email));
+    await this.redis.client.del(OtpKeys.challenge(id), OtpKeys.cooldown(id));
+  }
+
+  async emailLockRemainingSeconds(email: string): Promise<number> {
+    return this.retryAfterSeconds(OtpKeys.lock(emailOtpSubject(this.normalizeEmailAddress(email))), 0);
+  }
+
+  private mobileSubject(mobile: string): OtpSubject {
+    return { id: mobile, hourlyKey: OtpKeys.hourlyByMobile(mobile), masked: maskMobile(mobile), noun: 'number' };
+  }
+
+  private emailSubject(email: string): OtpSubject {
+    const id = emailOtpSubject(email);
+    return { id, hourlyKey: OtpKeys.hourlyByEmail(id), masked: maskEmail(email), noun: 'address' };
+  }
+
+  private normalizeEmailAddress(email: string): string {
+    const normalized = normalizeEmail(email);
+    if (normalized === null) {
+      throw new BadRequestException('Invalid e-mail address');
+    }
+    return normalized;
+  }
+
   /**
    * `crypto.randomInt` is a CSPRNG and is already uniform over the range, so no
    * modulo bias correction is needed. Codes are zero-padded to the configured
@@ -244,8 +307,8 @@ export class OtpService {
    * useless for another, and compares in constant time to avoid leaking the code
    * through response timing.
    */
-  private hashCode(mobile: string, code: string): string {
-    return createHash('sha256').update(`${mobile}:${code}`).digest('hex');
+  private hashCode(subjectId: string, code: string): string {
+    return createHash('sha256').update(`${subjectId}:${code}`).digest('hex');
   }
 
   /** Constant-time comparison helper, exported for reuse in token checks. */
@@ -268,13 +331,10 @@ export class OtpService {
     return normalized;
   }
 
-  private async assertNotLocked(mobile: string): Promise<void> {
-    const remaining = await this.retryAfterSeconds(OtpKeys.lock(mobile), 0);
+  private async assertNotLocked(subject: OtpSubject): Promise<void> {
+    const remaining = await this.retryAfterSeconds(OtpKeys.lock(subject.id), 0);
     if (remaining > 0) {
-      throw this.rateLimited(
-        `Too many failed attempts. This number is locked for ${remaining} more seconds.`,
-        remaining,
-      );
+      throw this.rateLimited(`Too many failed attempts. This ${subject.noun} is locked for ${remaining} more seconds.`, remaining);
     }
   }
 

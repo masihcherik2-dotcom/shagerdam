@@ -28,6 +28,8 @@ import type {
   VendorProductDetailDto,
   VendorProductSummaryDto,
   VendorVariantDto,
+  DraftPublishSummaryDto,
+  PublishDraftsResponseDto,
 } from './dto/product-response.dto';
 import { TorobFeedCacheService } from '../integrations/torob/torob-feed-cache.service';
 import { InventoryService, type StockLevel } from './inventory.service';
@@ -85,6 +87,15 @@ interface GalleryEntry {
 }
 
 type Tx = Prisma.TransactionClient;
+
+/** Products a bulk publish may touch: one store, or every store (staff only). */
+export interface DraftScope {
+  vendorId?: string;
+}
+
+/** Rows published (and audited) per transaction by a bulk publish. */
+export const PUBLISH_DRAFTS_BATCH = 500;
+
 
 /**
  * Vendor catalogue management and staff moderation.
@@ -654,6 +665,102 @@ export class ProductsService {
   }
 
   // ===========================================================================
+  // Bulk publish of drafts (vendor: own store; staff: all stores or one)
+  // ===========================================================================
+
+  async draftSummaryForVendor(userId: string): Promise<DraftPublishSummaryDto> {
+    const store = await this.requireStore(userId, 'write');
+    return this.draftSummary({ vendorId: store.id });
+  }
+
+  async publishDraftsForVendor(userId: string, params: ActorParams): Promise<PublishDraftsResponseDto> {
+    const store = await this.requireStore(userId, 'write');
+    return this.publishDrafts({ vendorId: store.id }, params, 'vendor');
+  }
+
+  async draftSummaryForAdmin(vendorSlug: string | undefined): Promise<DraftPublishSummaryDto> {
+    return this.draftSummary(await this.adminDraftScope(vendorSlug));
+  }
+
+  async publishDraftsForAdmin(vendorSlug: string | undefined, params: ActorParams): Promise<PublishDraftsResponseDto> {
+    return this.publishDrafts(await this.adminDraftScope(vendorSlug), params, 'staff');
+  }
+
+  /**
+   * Counts the unpublished products of the scope by what publishing them
+   * would need. Uses exactly the rules of single-product publishing: not
+   * blocked by staff, store APPROVED, at least one active variant.
+   */
+  async draftSummary(scope: DraftScope): Promise<DraftPublishSummaryDto> {
+    const drafts = draftScopeWhere(scope);
+    const [blocked, storeNotApproved, noActiveVariant, publishable] = await this.prisma.$transaction([
+      this.prisma.product.count({ where: { AND: [drafts, { isBlockedByAdmin: true }] } }),
+      this.prisma.product.count({ where: { AND: [drafts, { isBlockedByAdmin: false, vendor: { status: { not: VendorStatus.APPROVED } } }] } }),
+      this.prisma.product.count({
+        where: { AND: [drafts, { isBlockedByAdmin: false, vendor: { status: VendorStatus.APPROVED }, variants: { none: { isActive: true } } }] },
+      }),
+      this.prisma.product.count({ where: publishableDraftWhere(scope) }),
+    ]);
+    return { publishable, blocked, noActiveVariant, storeNotApproved };
+  }
+
+  /**
+   * Publishes every draft of the scope that meets the publishing rules.
+   * Works in batches: each batch locks its rows (same row lock as single
+   * edits, taken in id order), re-checks the rules under the lock, flips
+   * `isPublished` and writes one STATUS_CHANGE audit row per product, all in
+   * one transaction. Drafts that do not qualify are left untouched and
+   * reported in `remaining`.
+   */
+  async publishDrafts(scope: DraftScope, params: ActorParams, by: 'vendor' | 'staff'): Promise<PublishDraftsResponseDto> {
+    const where = publishableDraftWhere(scope);
+    let published = 0;
+    // Each pass either publishes its candidates or finds none; the bound only guards against a runaway loop.
+    for (let pass = 0; pass < 10_000; pass += 1) {
+      const outcome = await this.prisma.$transaction(async (tx) => {
+        const candidates = await tx.product.findMany({ where, select: { id: true }, orderBy: { id: 'asc' }, take: PUBLISH_DRAFTS_BATCH });
+        if (candidates.length === 0) return { found: 0, published: 0 };
+        const ids = candidates.map((candidate) => candidate.id);
+        await tx.$queryRaw(Prisma.sql`SELECT id FROM products WHERE id IN (${Prisma.join(ids.map((id) => Prisma.sql`${id}::uuid`))}) ORDER BY id FOR UPDATE`);
+        const still = await tx.product.findMany({ where: { AND: [where, { id: { in: ids } }] }, select: { id: true } });
+        const confirmed = still.map((row) => row.id);
+        if (confirmed.length > 0) {
+          await tx.product.updateMany({ where: { id: { in: confirmed } }, data: { isPublished: true } });
+          await tx.auditLog.createMany({
+            data: confirmed.map((id) => ({
+              userId: params.actorId,
+              action: AuditAction.STATUS_CHANGE,
+              entityName: 'Product',
+              entityId: id,
+              ipAddress: params.context.ipAddress,
+              userAgent: params.context.userAgent,
+              oldValue: { isPublished: false },
+              newValue: { isPublished: true, changed: ['isPublished'], by, bulk: 'publish-drafts' },
+            })),
+          });
+        }
+        return { found: candidates.length, published: confirmed.length };
+      });
+      published += outcome.published;
+      if (outcome.found === 0) break;
+    }
+
+    if (published > 0) {
+      this.logger.log(`Bulk publish by ${params.actorId} (${by}, ${scope.vendorId !== undefined ? `store ${scope.vendorId}` : 'all stores'}): ${published} product(s)`);
+      await this.catalogChanged();
+    }
+    return { published, remaining: await this.draftSummary(scope) };
+  }
+
+  private async adminDraftScope(vendorSlug: string | undefined): Promise<DraftScope> {
+    const slug = vendorSlug?.trim().toLowerCase();
+    if (!slug) return {};
+    const store = await this.prisma.vendor.findUnique({ where: { storeSlug: slug }, select: { id: true } });
+    if (!store) throw new NotFoundException('No store with this slug');
+    return { vendorId: store.id };
+  }
+
+  // ===========================================================================
   // Internals
   // ===========================================================================
 
@@ -833,6 +940,21 @@ function normalizeVariant(dto: CreateVariantDto): NormalizedVariant {
 }
 
 /** Row-locks a product for the rest of the transaction (serialises publish/deactivate races). */
+/** Unpublished products of the scope. */
+function draftScopeWhere(scope: DraftScope): Prisma.ProductWhereInput {
+  return {
+    isPublished: false,
+    ...(scope.vendorId !== undefined ? { vendorId: scope.vendorId } : {}),
+  };
+}
+
+/** Drafts of the scope that may be published: the single-product publishing rules, as a filter. */
+export function publishableDraftWhere(scope: DraftScope): Prisma.ProductWhereInput {
+  return {
+    AND: [draftScopeWhere(scope), { isBlockedByAdmin: false, vendor: { status: VendorStatus.APPROVED }, variants: { some: { isActive: true } } }],
+  };
+}
+
 async function lockProduct(tx: Tx, productId: string): Promise<void> {
   const rows = await tx.$queryRaw<Array<{ id: string }>>(
     Prisma.sql`SELECT id FROM products WHERE id = ${productId}::uuid FOR UPDATE`,

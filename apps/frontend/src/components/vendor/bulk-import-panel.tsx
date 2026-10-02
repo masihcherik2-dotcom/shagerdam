@@ -93,7 +93,7 @@ export function BulkImportPanel({ endpoints = VENDOR_BULK_ENDPOINTS, staff = fal
   const [priceUnit, setPriceUnit] = useState<BulkPriceUnit>('AUTO');
   const [defaultStock, setDefaultStock] = useState('10');
   const [defaultCategoryId, setDefaultCategoryId] = useState('');
-  const [autoPublish, setAutoPublish] = useState(false);
+  const [autoPublish, setAutoPublish] = useState(true);
   const [optionsError, setOptionsError] = useState<string | null>(null);
 
   // Job
@@ -205,6 +205,8 @@ export function BulkImportPanel({ endpoints = VENDOR_BULK_ENDPOINTS, staff = fal
       const result = await apiPost<CrawlStoreResponse>(`${base}/crawl-store`, body, { timeout: CRAWL_TIMEOUT_MS });
       setScan(result);
       setSelected(new Set(result.productUrls));
+      // A new import publishes by default, even if the previously loaded job ran as drafts (retries keep the job's own choice).
+      setAutoPublish(true);
       if (address) setStoreUrl(address);
     } catch (error) {
       setScan(null);

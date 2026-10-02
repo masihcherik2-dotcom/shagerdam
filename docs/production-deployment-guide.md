@@ -199,6 +199,7 @@ In development every external integration uses a sandbox implementation behind t
 | File storage | `local` (volume) | `s3` (ArvanCloud / Liara / any S3-compatible store) | Implemented (`S3StorageProvider`) |
 | BNPL credit | `SANDBOX_BANK` | a bank's live credit API | **Not implemented**; see §4.4 |
 | Sign in with Google | off (blank `GOOGLE_*`) | Google OAuth client | Implemented (OIDC + PKCE); optional, see §4.5 |
+| E-mail sign-in codes | `sandbox` (code printed to the log, nothing sent) | `smtp` (Gmail / Google Workspace / any SMTP server) or `none` | Implemented (`SmtpMailProvider`, nodemailer); optional, see §4.6 |
 
 ### 4.1 SMS: Kavenegar [needs account]
 
@@ -372,6 +373,56 @@ docker compose -f docker-compose.prod.yml --env-file /opt/shopino/.env.productio
 - The API refuses to boot if only one of the id and secret is set, or if the redirect URI is not https in production.
 - The server must be able to reach `oauth2.googleapis.com`. The user's browser must be able to reach `accounts.google.com`, which is filtered for many users inside Iran.
 - Google sign-in therefore supplements the SMS login and never replaces it.
+
+### 4.6 Sign-in codes by e-mail (SMTP) [needs a mailbox]
+
+Optional. With `MAIL_PROVIDER` blank (or `none`) in production, the login page shows no «ورود با ایمیل» tab. `MAIL_PROVIDER=sandbox` is refused in production because it never delivers.
+
+**How it works:**
+- On the login page's «ورود با ایمیل» tab the user enters an e-mail and receives a code. The rules and limits match the SMS code: a 120-second cooldown, an hourly cap per address, a cap per IP that is shared with SMS, and a 15-minute lock after 5 wrong codes.
+- An address that is **verified** on an account signs straight in. An address counts as verified once it has been proven by this code, by Google, or by the mobile step below.
+- Any other address confirms a mobile number once by SMS code. If an account with that mobile exists, the e-mail is added to it; otherwise a new customer account is created.
+- An e-mail that was only typed into a profile, and never proven, does **not** sign anyone in. If someone else proves that mailbox, the address moves to their account and the move is logged in `audit_logs`. Verified e-mails and e-mails of staff accounts are never moved.
+- Changing the e-mail in the profile makes it unverified again.
+- Staff accounts (admin, finance, support) cannot use e-mail codes; they sign in with their password.
+
+**Gmail (or Google Workspace) steps:**
+1. Use a dedicated mailbox for the shop, e.g. `noreply.shagerdam@gmail.com`.
+2. Turn on **2-Step Verification**: Google Account → Security.
+3. Create an **App password**: Google Account → Security → 2-Step Verification → App passwords. Google shows 16 characters once, in groups of four; write them together, without spaces, as `SMTP_PASS`. The normal account password does not work over SMTP.
+4. Put the settings into `/opt/shopino/.env.production`:
+
+```bash
+MAIL_PROVIDER=smtp
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=false            # 587 = STARTTLS (enforced in production); for port 465 use SMTP_SECURE=true
+SMTP_USER=noreply.shagerdam@gmail.com
+SMTP_PASS=abcdefghijklmnop   # the 16-character App password, written without spaces
+SMTP_FROM="شاگردم <noreply.shagerdam@gmail.com>"
+```
+
+5. Restart the API:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file /opt/shopino/.env.production up -d backend
+```
+
+6. Check the result:
+   - `docker compose -f docker-compose.prod.yml logs backend | grep "Mail provider"` shows `Mail provider: smtp (smtp.gmail.com:587, STARTTLS required)`;
+   - `curl -s https://<domain>/api/v1/auth/email-otp/status` returns `{"enabled":true,"isTestProvider":false}`;
+   - request a code for your own address on the login page.
+
+**Notes:**
+- **Sender address:** Gmail sends only as `SMTP_USER` or as a "Send mail as" alias verified in Gmail settings. Any other `From` (for example `noreply@shagerdam.ir`) is silently rewritten to `SMTP_USER`.
+  - To send as `@shagerdam.ir`, use Google Workspace or a mail service for that domain.
+  - Publish that service's SPF/DKIM/DMARC DNS records, or the codes will land in spam.
+- **Gmail limits:** a free Gmail account sends about 500 messages a day; Workspace allows about 2000. For larger volumes use a transactional mail service with an SMTP endpoint; only the `SMTP_*` values change.
+- **Ports:** the server must be able to open outbound TCP 587 (or 465). Some hosting providers block SMTP ports until you ask them to unblock.
+- **Failures:**
+  - The API refuses to boot with `MAIL_PROVIDER=smtp` but no `SMTP_HOST`/`SMTP_FROM`, or with only one of `SMTP_USER`/`SMTP_PASS`.
+  - If the SMTP server rejects a message or cannot be reached, the user sees «ارسال ایمیل انجام نشد» and can retry at once. The reason (for example `535` = wrong App password) is in the backend log; the address is masked there.
+- **Secrets:** `SMTP_PASS` is a secret, like the other keys in `.env.production`. Revoking the App password in the Google account stops delivery immediately.
 
 ---
 

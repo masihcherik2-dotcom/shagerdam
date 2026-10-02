@@ -5,6 +5,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useState } from 'react';
 
+import { PublishDraftsButton } from '@/components/products/publish-drafts-button';
 import { useToast } from '@/components/providers/toast-provider';
 import { Button, LinkButton } from '@/components/ui/button';
 import { Input } from '@/components/ui/field';
@@ -52,6 +53,7 @@ export default function VendorProductsPage() {
         title="محصولات"
         action={
           <div className="flex flex-wrap gap-2">
+            <PublishDraftsButton endpoint="/vendor/products/publish-drafts" scopeLabel="فروشگاه شما" onPublished={state.reload} />
             <LinkButton href="/vendor/products/new?tab=bulk" variant="success" icon={<Rocket className="size-4" />} data-testid="vendor-bulk-import">
               درون‌ریزی کل فروشگاه
             </LinkButton>

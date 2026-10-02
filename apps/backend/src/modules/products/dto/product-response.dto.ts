@@ -465,3 +465,26 @@ export class AdminProductStatusResponseDto {
   @ApiPropertyOptional({ type: [String], example: ['isBlockedByAdmin', 'isPublished'], description: 'Fields that changed.' })
   changed!: string[];
 }
+
+/** Drafts that a bulk publish would (or would not) put on the storefront. */
+export class DraftPublishSummaryDto {
+  @ApiProperty({ example: 42, description: 'Unpublished products that meet every publishing rule and would be published.' })
+  publishable!: number;
+
+  @ApiProperty({ example: 2, description: 'Unpublished products blocked by staff (never published by this action).' })
+  blocked!: number;
+
+  @ApiProperty({ example: 3, description: 'Unpublished products without an active variant (nothing to sell).' })
+  noActiveVariant!: number;
+
+  @ApiProperty({ example: 0, description: 'Unpublished products of stores that are not APPROVED (staff scope only; always 0 for a vendor).' })
+  storeNotApproved!: number;
+}
+
+export class PublishDraftsResponseDto {
+  @ApiProperty({ example: 42, description: 'Products published by this request.' })
+  published!: number;
+
+  @ApiProperty({ type: DraftPublishSummaryDto, description: 'What is still unpublished afterwards, and why.' })
+  remaining!: DraftPublishSummaryDto;
+}

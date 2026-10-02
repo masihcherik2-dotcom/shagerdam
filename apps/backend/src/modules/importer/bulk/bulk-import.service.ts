@@ -146,7 +146,8 @@ export class BulkImportService implements OnApplicationShutdown {
     await this.importer.requireApprovedStore(actor.ownerUserId);
     const urls = this.validateUrls(input.urls);
     const options: DraftOptions = {
-      autoPublish: input.autoPublish ?? false,
+      // Imported products go live at once unless the caller asks for drafts.
+      autoPublish: input.autoPublish ?? true,
       priceUnit: input.priceUnit ?? 'AUTO',
       defaultStock: input.defaultStock ?? 10,
       defaultCategoryId: input.defaultCategoryId ?? null,

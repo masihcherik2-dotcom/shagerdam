@@ -325,6 +325,7 @@ describe('Sign-in with Google (live stack, local OIDC token endpoint)', () => {
       const row = await prisma.user.findUniqueOrThrow({ where: { mobile: MOBILES.newUser }, include: { customerProfile: true } });
       expect(row).toMatchObject({ googleSubject: subject, avatarUrl: 'https://lh3.googleusercontent.com/a/negar', role: UserRole.CUSTOMER });
       expect(row.customerProfile).not.toBeNull();
+      expect(row.emailVerifiedAt).not.toBeNull(); // Google vouched for the e-mail
       expect(await redis.client.exists(GoogleKeys.signup(ticket))).toBe(0);
       const audit = await prisma.auditLog.findFirst({ where: { userId: row.id, action: 'LOGIN' }, orderBy: { createdAt: 'desc' } });
       expect(audit?.newValue).toMatchObject({ success: true, method: 'google', linked: 'new_account' });
@@ -350,6 +351,7 @@ describe('Sign-in with Google (live stack, local OIDC token endpoint)', () => {
       const after = await prisma.user.findUniqueOrThrow({ where: { id: before.id } });
       // Linked; the verified Google e-mail fills the empty e-mail; the name the customer chose is kept.
       expect(after).toMatchObject({ googleSubject: `existing-${RUN}`, email: `g-existing-${RUN}@gmail.com`, fullName: 'مشتری قدیمی' });
+      expect(after.emailVerifiedAt).not.toBeNull();
       expect(await prisma.user.count({ where: { mobile: MOBILES.existing } })).toBe(1);
     });
 
@@ -358,7 +360,9 @@ describe('Sign-in with Google (live stack, local OIDC token endpoint)', () => {
       const response = await signInWithGoogle({ sub: `owner-${RUN}`, email: EMAILS.emailOwner, email_verified: true });
       expect(response.body.status).toBe('signed_in');
       expect(response.body.tokens?.user.id).toBe(owner.id);
-      expect((await prisma.user.findUniqueOrThrow({ where: { id: owner.id } })).googleSubject).toBe(`owner-${RUN}`);
+      const linked = await prisma.user.findUniqueOrThrow({ where: { id: owner.id } });
+      expect(linked.googleSubject).toBe(`owner-${RUN}`);
+      expect(linked.emailVerifiedAt).not.toBeNull(); // the profile e-mail is now proven by Google
     });
 
     it('does not trust an unverified Google e-mail: the mobile must be verified instead', async () => {

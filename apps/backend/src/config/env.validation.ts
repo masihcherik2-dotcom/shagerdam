@@ -33,6 +33,14 @@ export const MIN_SECRET_LENGTH = 32;
 export const SMS_PROVIDERS = ['sandbox', 'kavenegar'] as const;
 export type SmsProviderName = (typeof SMS_PROVIDERS)[number];
 
+/**
+ * E-mail providers: `smtp` delivers through any SMTP server (Gmail, a corporate
+ * relay, Mailgun/SES SMTP…); `sandbox` writes messages to the log
+ * (development/test only); `none` switches e-mail sign-in off.
+ */
+export const MAIL_PROVIDERS = ['none', 'sandbox', 'smtp'] as const;
+export type MailProviderName = (typeof MAIL_PROVIDERS)[number];
+
 /** Card-payment (IPG) gateways the API can be configured with. */
 export const PAYMENT_GATEWAY_PROVIDERS = ['sandbox', 'zarinpal'] as const;
 /** Unit of the prices in the Torob feed: IRR = Rial (the platform currency), IRT = Toman (Rial ÷ 10). */
@@ -71,6 +79,11 @@ const OPTIONAL_KEYS: readonly string[] = [
   'GOOGLE_CLIENT_ID',
   'GOOGLE_CLIENT_SECRET',
   'GOOGLE_REDIRECT_URI',
+  'MAIL_PROVIDER',
+  'SMTP_HOST',
+  'SMTP_USER',
+  'SMTP_PASS',
+  'SMTP_FROM',
 ];
 
 /** Shape of the validated configuration object exposed through `ConfigService`. */
@@ -241,6 +254,56 @@ export class EnvironmentVariables {
   @IsString()
   @MinLength(1)
   SMS_KAVENEGAR_OTP_TEMPLATE?: string;
+
+  // ─── E-mail (sign-in codes by e-mail) ────────────────────────────────────
+  /**
+   * Blank → `sandbox` in development/test and `none` (e-mail sign-in off) in
+   * production, so an existing deployment keeps booting until SMTP is set up.
+   * See {@link resolveMailProvider}.
+   */
+  @IsOptional()
+  @IsIn(MAIL_PROVIDERS, { message: `MAIL_PROVIDER must be one of: ${MAIL_PROVIDERS.join(', ')}` })
+  MAIL_PROVIDER?: MailProviderName;
+
+  /** Prints e-mailed codes to the log. Only meaningful for the sandbox provider. */
+  @Transform(toBoolean)
+  @IsBoolean()
+  MAIL_SANDBOX_LOG_CODES: boolean = true;
+
+  /** SMTP server, e.g. smtp.gmail.com. Required when MAIL_PROVIDER=smtp. */
+  @IsOptional()
+  @Matches(/^[A-Za-z0-9.-]+$/, { message: 'SMTP_HOST must be a host name such as smtp.gmail.com (no scheme, no port)' })
+  SMTP_HOST?: string;
+
+  /** 587 = submission with STARTTLS (SMTP_SECURE=false); 465 = implicit TLS (SMTP_SECURE=true). */
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(65_535)
+  SMTP_PORT: number = 587;
+
+  /** true = TLS from the first byte (port 465). false = plain connection upgraded with STARTTLS (port 587). */
+  @Transform(toBoolean)
+  @IsBoolean()
+  SMTP_SECURE: boolean = false;
+
+  /** SMTP login. For Gmail: the full address; the password is a 16-character App Password, not the account password. */
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  SMTP_USER?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  SMTP_PASS?: string;
+
+  /** Sender, `Name <address>` or a bare address. Gmail only sends as the login address or a verified "Send mail as" alias. */
+  @IsOptional()
+  @Matches(/^(?:[^<>\r\n]{1,100} <[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+>|[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+)$/, {
+    message: 'SMTP_FROM must be an address or "Name <address>", e.g. "شاگردم <noreply@shagerdam.ir>"',
+  })
+  SMTP_FROM?: string;
 
   // ─── File storage ─────────────────────────────────────────────────────────
   /**
@@ -490,6 +553,7 @@ export function validateEnvironment(
   assertStorageConfiguration(config, logger);
   assertPaymentConfiguration(config, logger);
   assertGoogleConfiguration(config);
+  assertMailConfiguration(config, logger);
   return config;
 }
 
@@ -670,6 +734,43 @@ function assertGoogleConfiguration(config: EnvironmentVariables): void {
   const redirectUri = resolveGoogleRedirectUri(config);
   if (config.NODE_ENV === NodeEnvironment.Production && !redirectUri.startsWith('https://')) {
     throw new Error(`Google sign-in in production needs an https redirect URI (got "${redirectUri}"). Set PUBLIC_WEB_ORIGIN or GOOGLE_REDIRECT_URI to the https address.`);
+  }
+}
+
+/** Effective e-mail provider (see {@link EnvironmentVariables.MAIL_PROVIDER}). */
+export function resolveMailProvider(config: Pick<EnvironmentVariables, 'MAIL_PROVIDER' | 'NODE_ENV'>): MailProviderName {
+  return config.MAIL_PROVIDER ?? (config.NODE_ENV === NodeEnvironment.Production ? 'none' : 'sandbox');
+}
+
+/**
+ * SMTP needs a server and a sender; a login without its password (or the other
+ * way round) is a typo worth failing on. The sandbox never runs in production.
+ */
+function assertMailConfiguration(config: EnvironmentVariables, logger: Pick<Logger, 'warn'>): void {
+  const provider = resolveMailProvider(config);
+  if (provider === 'smtp') {
+    const missing = (['SMTP_HOST', 'SMTP_FROM'] as const).filter((key) => config[key] === undefined);
+    if (missing.length > 0) {
+      throw new Error(`MAIL_PROVIDER=smtp requires ${missing.join(', ')}. Set the SMTP server and sender, or MAIL_PROVIDER=none to switch e-mail sign-in off.`);
+    }
+    if ((config.SMTP_USER === undefined) !== (config.SMTP_PASS === undefined)) {
+      throw new Error(`SMTP login needs both SMTP_USER and SMTP_PASS (missing ${config.SMTP_USER === undefined ? 'SMTP_USER' : 'SMTP_PASS'}).`);
+    }
+    if (config.SMTP_PORT === 465 && !config.SMTP_SECURE) {
+      logger.warn('SMTP_PORT=465 normally needs SMTP_SECURE=true (implicit TLS); with false the connection will likely hang.');
+    }
+    if (config.SMTP_PORT === 587 && config.SMTP_SECURE) {
+      logger.warn('SMTP_PORT=587 normally needs SMTP_SECURE=false (STARTTLS); with true the TLS handshake will fail.');
+    }
+    return;
+  }
+  if (provider === 'sandbox') {
+    if (config.NODE_ENV === NodeEnvironment.Production) {
+      throw new Error('MAIL_PROVIDER=sandbox cannot be used in production: it logs e-mails instead of sending them. Configure MAIL_PROVIDER=smtp, or MAIL_PROVIDER=none.');
+    }
+    if (config.MAIL_SANDBOX_LOG_CODES) {
+      logger.warn('MAIL_PROVIDER=sandbox — e-mailed sign-in codes are written to the application log and not delivered. This is a development/test provider only.');
+    }
   }
 }
 

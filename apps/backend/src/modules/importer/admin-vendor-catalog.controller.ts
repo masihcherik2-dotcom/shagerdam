@@ -167,7 +167,7 @@ export class AdminVendorCatalogController {
     @Req() request: unknown,
   ): Promise<BulkExtractResponseDto> {
     const started = await this.bulk.start(await this.staffActor(vendorId, user), bulkStartInput(dto));
-    setAuditSnapshot(request, { actorId: user.id, newValue: { vendorId, jobId: started.jobId, totalProducts: started.totalProducts, storeUrl: dto.storeUrl ?? null, autoPublish: dto.autoPublish ?? false } });
+    setAuditSnapshot(request, { actorId: user.id, newValue: { vendorId, jobId: started.jobId, totalProducts: started.totalProducts, storeUrl: dto.storeUrl ?? null, autoPublish: dto.autoPublish ?? true } });
     return started;
   }
 

@@ -4,12 +4,15 @@ import { JwtModule } from '@nestjs/jwt';
 import type { EnvironmentVariables } from '../../config/env.validation';
 import type { DurationString } from '../../common/types/duration';
 import { AuditModule } from '../audit/audit.module';
+import { MailModule } from '../mail/mail.module';
 import { SmsModule } from '../sms/sms.module';
 import { UsersModule } from '../users/users.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { OtpService } from './otp.service';
 import { TokenService } from './token.service';
+import { EmailOtpController } from './email-otp/email-otp.controller';
+import { EmailOtpService } from './email-otp/email-otp.service';
 import { GoogleAuthController } from './google/google-auth.controller';
 import { GoogleAuthService } from './google/google-auth.service';
 import { GOOGLE_OAUTH_ENDPOINTS, GOOGLE_PUBLIC_ENDPOINTS, GoogleOAuthClient } from './google/google-oauth.client';
@@ -37,15 +40,17 @@ import { GOOGLE_OAUTH_ENDPOINTS, GOOGLE_PUBLIC_ENDPOINTS, GoogleOAuthClient } fr
     }),
     UsersModule,
     SmsModule,
+    MailModule,
     AuditModule,
   ],
-  controllers: [AuthController, GoogleAuthController],
+  controllers: [AuthController, GoogleAuthController, EmailOtpController],
   providers: [
     AuthService,
     OtpService,
     TokenService,
     GoogleOAuthClient,
     GoogleAuthService,
+    EmailOtpService,
     { provide: GOOGLE_OAUTH_ENDPOINTS, useValue: GOOGLE_PUBLIC_ENDPOINTS },
   ],
   exports: [AuthService, TokenService],

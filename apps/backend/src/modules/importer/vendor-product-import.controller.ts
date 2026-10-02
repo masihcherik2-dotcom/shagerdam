@@ -158,7 +158,7 @@ export class VendorProductImportController {
     summary: 'Start a background job importing many product pages as products of this store',
     description:
       'Returns { jobId, totalProducts } at once; poll GET bulk-jobs/{jobId}. Pages are processed 3 at a time (≥ 0.5 s between page ' +
-      'requests); each becomes a product (unpublished unless autoPublish) with up to 6 images, or is reported as SKIPPED (already imported), ' +
+      'requests); each becomes a product (published at once unless autoPublish is false) with up to 6 images, or is reported as SKIPPED (already imported), ' +
       'NEEDS_REVIEW (no price, unknown unit or no category) or FAILED. One running job per store; 400 products per store per 24 h.',
   })
   @ApiAcceptedResponse({ type: BulkExtractResponseDto })
@@ -168,7 +168,7 @@ export class VendorProductImportController {
   async bulkExtract(@Body() dto: BulkExtractDto, @CurrentUser() user: AuthenticatedUser, @Req() request: unknown): Promise<BulkExtractResponseDto> {
     const actor = await this.bulk.vendorActor(user.id);
     const started = await this.bulk.start(actor, bulkStartInput(dto));
-    setAuditSnapshot(request, { actorId: user.id, newValue: { jobId: started.jobId, totalProducts: started.totalProducts, storeUrl: dto.storeUrl ?? null, autoPublish: dto.autoPublish ?? false, priceUnit: dto.priceUnit ?? 'AUTO' } });
+    setAuditSnapshot(request, { actorId: user.id, newValue: { jobId: started.jobId, totalProducts: started.totalProducts, storeUrl: dto.storeUrl ?? null, autoPublish: dto.autoPublish ?? true, priceUnit: dto.priceUnit ?? 'AUTO' } });
     return started;
   }
 

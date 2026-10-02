@@ -1340,3 +1340,17 @@ export interface BulkJob {
   progressPercent: number;
   items: BulkItem[];
 }
+
+/** GET …/products/publish-drafts — what a bulk publish of drafts would do. */
+export interface DraftPublishSummary {
+  publishable: number;
+  blocked: number;
+  noActiveVariant: number;
+  storeNotApproved: number;
+}
+
+/** POST …/products/publish-drafts */
+export interface PublishDraftsResult {
+  published: number;
+  remaining: DraftPublishSummary;
+}

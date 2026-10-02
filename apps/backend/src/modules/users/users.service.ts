@@ -57,6 +57,12 @@ export interface GoogleLinkedUser {
   googleSubject: string | null;
 }
 
+/** A user with the proof state of its e-mail address. */
+export interface EmailOwner {
+  user: PublicUser;
+  emailVerifiedAt: Date | null;
+}
+
 /** What a Google sign-in contributes to an account. */
 export interface GoogleLinkInput {
   subject: string;
@@ -206,6 +212,8 @@ export class UsersService {
       throw new ConflictException({ statusCode: 409, error: 'Conflict', code: 'GOOGLE_ACCOUNT_CONFLICT', message: 'This account is already linked to another Google account' });
     }
     const adoptEmail = current.email === null && link.email !== null && link.emailVerified && (await this.prisma.user.count({ where: { email: link.email } })) === 0;
+    // Google vouches for the address the account already has → it is now proven.
+    const confirmsEmail = adoptEmail || (current.email !== null && link.emailVerified && link.email === current.email);
     try {
       const updated = await this.prisma.user.update({
         where: { id: userId },
@@ -213,6 +221,7 @@ export class UsersService {
           googleSubject: link.subject,
           ...(link.picture !== null ? { avatarUrl: link.picture } : {}),
           ...(adoptEmail ? { email: link.email } : {}),
+          ...(confirmsEmail ? { emailVerifiedAt: new Date() } : {}),
         },
         select: PUBLIC_USER_SELECT,
       });
@@ -237,6 +246,7 @@ export class UsersService {
           mobile: normalized,
           fullName: link.name ?? `کاربر ${toNationalFormat(normalized)}`,
           email: useEmail ? link.email : null,
+          emailVerifiedAt: useEmail ? new Date() : null,
           googleSubject: link.subject,
           avatarUrl: link.picture,
           role: UserRole.CUSTOMER,
@@ -252,6 +262,78 @@ export class UsersService {
   }
 
   /** Unique-constraint races (subject, mobile or e-mail taken meanwhile) become a 409 the client can explain. */
+  // ─── E-mail identity (sign-in by e-mailed code) ───────────────────────────
+
+  /** The account holding `email`, with whether the address was ever proven. */
+  async findByEmailForSignIn(email: string): Promise<EmailOwner | null> {
+    const user = await this.prisma.user.findUnique({ where: { email }, select: { ...PUBLIC_USER_SELECT, emailVerifiedAt: true } });
+    return user === null ? null : { user: this.toPublicUser(user), emailVerifiedAt: user.emailVerifiedAt };
+  }
+
+  async findByMobileForEmailLink(mobile: string): Promise<EmailOwner | null> {
+    const normalized = toE164(mobile) ?? mobile;
+    const user = await this.prisma.user.findUnique({ where: { mobile: normalized }, select: { ...PUBLIC_USER_SELECT, emailVerifiedAt: true } });
+    return user === null ? null : { user: this.toPublicUser(user), emailVerifiedAt: user.emailVerifiedAt };
+  }
+
+  /** Records that the owner of an account just proved its current address. */
+  async markEmailVerified(userId: string): Promise<PublicUser> {
+    return this.prisma.user.update({ where: { id: userId }, data: { emailVerifiedAt: new Date() }, select: PUBLIC_USER_SELECT });
+  }
+
+  /**
+   * Gives a proven address to an account (the one of a verified mobile), or to
+   * a new customer when `userId` is null. Proof beats an unproven claim: if the
+   * address sits unverified on another customer/vendor account, it is removed
+   * there first — all in one transaction. A *verified* holder elsewhere, or a
+   * staff account, is a conflict.
+   */
+  async attachProvenEmail(target: { userId: string } | { newCustomerMobile: string }, email: string): Promise<{ user: PublicUser; detachedFrom: string | null }> {
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const holder = await tx.user.findUnique({ where: { email }, select: { id: true, emailVerifiedAt: true, role: true } });
+        const targetId = 'userId' in target ? target.userId : null;
+        let detachedFrom: string | null = null;
+        if (holder !== null && holder.id !== targetId) {
+          // Staff sign in with e-mail + password: their address is never taken away here.
+          const isStaff = holder.role !== UserRole.CUSTOMER && holder.role !== UserRole.VENDOR;
+          if (holder.emailVerifiedAt !== null || isStaff) {
+            throw new ConflictException({ statusCode: 409, error: 'Conflict', code: 'EMAIL_OTP_EMAIL_TAKEN', message: 'This e-mail address is verified on another account.' });
+          }
+          await tx.user.update({ where: { id: holder.id }, data: { email: null, emailVerifiedAt: null } });
+          detachedFrom = holder.id;
+        }
+        const now = new Date();
+        const user =
+          targetId !== null
+            ? await tx.user.update({ where: { id: targetId }, data: { email, emailVerifiedAt: now }, select: PUBLIC_USER_SELECT })
+            : await tx.user.create({
+                data: {
+                  mobile: (target as { newCustomerMobile: string }).newCustomerMobile,
+                  fullName: `کاربر ${toNationalFormat((target as { newCustomerMobile: string }).newCustomerMobile)}`,
+                  email,
+                  emailVerifiedAt: now,
+                  role: UserRole.CUSTOMER,
+                  customerProfile: { create: {} },
+                },
+                select: PUBLIC_USER_SELECT,
+              });
+        if (detachedFrom !== null) {
+          this.logger.warn(`Unverified e-mail removed from user ${detachedFrom}: proven by the owner of user ${user.id}`);
+        }
+        if (targetId === null) {
+          this.logger.log(`Customer account created through e-mail sign-in: ${user.id}`);
+        }
+        return { user, detachedFrom };
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException({ statusCode: 409, error: 'Conflict', code: 'EMAIL_OTP_CONFLICT', message: 'The mobile number or e-mail was registered by another account meanwhile. Try again.' });
+      }
+      throw error;
+    }
+  }
+
   private googleConflict(error: unknown): unknown {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       return new ConflictException({ statusCode: 409, error: 'Conflict', code: 'GOOGLE_ACCOUNT_CONFLICT', message: 'The Google account, mobile or e-mail was linked to another account meanwhile' });
@@ -318,7 +400,8 @@ export class UsersService {
         where: { id: userId },
         data: {
           ...(dto.fullName !== undefined ? { fullName: dto.fullName.trim() } : {}),
-          ...(email !== undefined ? { email } : {}),
+          // A new address is only a claim until proven by an e-mailed code.
+          ...(email !== undefined ? { email, ...(email !== current.email ? { emailVerifiedAt: null } : {}) } : {}),
           ...(nationalCode !== undefined ? { nationalCode } : {}),
         },
         select: PUBLIC_USER_SELECT,

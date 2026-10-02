@@ -182,3 +182,12 @@ export class AdminProductQueryDto extends PaginationQueryDto {
   @IsBoolean()
   isPublished?: boolean;
 }
+
+/** Staff bulk publish: all stores, or the one with this slug. */
+export class PublishDraftsQueryDto {
+  @ApiPropertyOptional({ example: 'shopino-sample-store', description: 'Only this store; omit for every store.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(140)
+  vendorSlug?: string;
+}

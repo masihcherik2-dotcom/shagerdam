@@ -36,6 +36,8 @@ import {
   PaginatedVendorProductsDto,
   VendorProductDetailDto,
   VendorVariantDto,
+  DraftPublishSummaryDto,
+  PublishDraftsResponseDto,
 } from './dto/product-response.dto';
 import { ProductsService } from './products.service';
 
@@ -93,6 +95,31 @@ export class VendorProductsController {
       total,
       totalPages: Math.max(1, Math.ceil(total / query.pageSize)),
     };
+  }
+
+  @Get('publish-drafts')
+  @ApiOperation({
+    summary: 'Preview the bulk publish of drafts',
+    description: 'How many unpublished products of the store would be published, and how many would stay unpublished and why.',
+  })
+  @ApiOkResponse({ type: DraftPublishSummaryDto })
+  draftSummary(@CurrentUser() user: AuthenticatedUser): Promise<DraftPublishSummaryDto> {
+    return this.products.draftSummaryForVendor(user.id);
+  }
+
+  @Post('publish-drafts')
+  @HttpCode(HttpStatus.OK)
+  @SkipAudit()
+  @ApiOperation({
+    summary: 'Publish all draft products of the store at once',
+    description:
+      'Publishes every unpublished product that meets the publishing rules: not blocked by staff and with at least one active ' +
+      'variant (variants are never switched on by this action). Products that do not qualify stay unpublished and are counted in ' +
+      '`remaining`. One audit row per published product. Note: archived (removed) products are unpublished too and are therefore republished.',
+  })
+  @ApiOkResponse({ type: PublishDraftsResponseDto })
+  publishDrafts(@CurrentUser() user: AuthenticatedUser, @ClientContext() context: RequestContext): Promise<PublishDraftsResponseDto> {
+    return this.products.publishDraftsForVendor(user.id, { actorId: user.id, context });
   }
 
   @Get(':id')

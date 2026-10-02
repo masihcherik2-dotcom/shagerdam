@@ -1,5 +1,5 @@
 import type { ConfigService } from '@nestjs/config';
-import { validateEnvironment, NodeEnvironment, resolveGoogleRedirectUri } from './env.validation';
+import { validateEnvironment, NodeEnvironment, resolveGoogleRedirectUri, resolveMailProvider } from './env.validation';
 import { resolveLogLevels } from './logger.config';
 import { buildCorsOptions, parseOriginList } from './cors.config';
 
@@ -365,5 +365,51 @@ describe('Google sign-in configuration', () => {
     const production = { ...VALID_ENV, NODE_ENV: 'production', SMS_PROVIDER: 'kavenegar', SMS_KAVENEGAR_API_KEY: 'k', SMS_KAVENEGAR_SENDER: 's', SMS_KAVENEGAR_OTP_TEMPLATE: 't', PAYMENT_GATEWAY_PROVIDER: 'zarinpal', ZARINPAL_MERCHANT_ID: MERCHANT_ID, ...CLIENT };
     expect(() => validateEnvironment(production)).toThrow(/https redirect URI/);
     expect(() => validateEnvironment({ ...production, PUBLIC_WEB_ORIGIN: 'https://shagerdam.ir' })).not.toThrow();
+  });
+});
+
+describe('e-mail (SMTP) configuration', () => {
+  const PRODUCTION = { ...VALID_ENV, NODE_ENV: 'production', SMS_PROVIDER: 'kavenegar', SMS_KAVENEGAR_API_KEY: 'k', SMS_KAVENEGAR_SENDER: 's', SMS_KAVENEGAR_OTP_TEMPLATE: 't', PAYMENT_GATEWAY_PROVIDER: 'zarinpal', ZARINPAL_MERCHANT_ID: MERCHANT_ID };
+  const SMTP = { MAIL_PROVIDER: 'smtp', SMTP_HOST: 'smtp.gmail.com', SMTP_USER: 'shop@gmail.com', SMTP_PASS: 'abcd efgh ijkl mnop', SMTP_FROM: 'شاگردم <shop@gmail.com>' };
+
+  it('defaults to sandbox in development and to off in production, so existing deployments keep booting', () => {
+    const dev = validateEnvironment(VALID_ENV);
+    expect(resolveMailProvider(dev)).toBe('sandbox');
+    expect(dev.SMTP_PORT).toBe(587);
+    expect(dev.SMTP_SECURE).toBe(false);
+    expect(resolveMailProvider(validateEnvironment({ ...PRODUCTION, MAIL_PROVIDER: '' }))).toBe('none');
+  });
+
+  it('refuses the sandbox in production', () => {
+    expect(() => validateEnvironment({ ...PRODUCTION, MAIL_PROVIDER: 'sandbox' })).toThrow(/MAIL_PROVIDER=sandbox cannot be used in production/);
+  });
+
+  it('accepts a complete Gmail SMTP setup in production', () => {
+    const config = validateEnvironment({ ...PRODUCTION, ...SMTP, SMTP_PORT: '587', SMTP_SECURE: 'false' });
+    expect(resolveMailProvider(config)).toBe('smtp');
+    expect(config.SMTP_FROM).toBe('شاگردم <shop@gmail.com>');
+  });
+
+  it('needs a host and a sender, and the login as a pair', () => {
+    expect(() => validateEnvironment({ ...VALID_ENV, ...SMTP, SMTP_HOST: '' })).toThrow(/requires SMTP_HOST/);
+    expect(() => validateEnvironment({ ...VALID_ENV, ...SMTP, SMTP_FROM: '' })).toThrow(/requires SMTP_FROM/);
+    expect(() => validateEnvironment({ ...VALID_ENV, ...SMTP, SMTP_PASS: '' })).toThrow(/missing SMTP_PASS/);
+    expect(() => validateEnvironment({ ...VALID_ENV, ...SMTP, SMTP_USER: undefined })).toThrow(/missing SMTP_USER/);
+    expect(() => validateEnvironment({ ...VALID_ENV, ...SMTP, SMTP_USER: '', SMTP_PASS: '' })).not.toThrow();
+  });
+
+  it('rejects malformed hosts, senders and providers', () => {
+    expect(() => validateEnvironment({ ...VALID_ENV, ...SMTP, SMTP_HOST: 'https://smtp.gmail.com' })).toThrow(/SMTP_HOST must be/);
+    expect(() => validateEnvironment({ ...VALID_ENV, ...SMTP, SMTP_FROM: 'not an address' })).toThrow(/SMTP_FROM must be/);
+    expect(() => validateEnvironment({ ...VALID_ENV, ...SMTP, SMTP_FROM: 'Shop <a@b.com>\r\nBcc: x@y.com' })).toThrow(/SMTP_FROM must be/);
+    expect(() => validateEnvironment({ ...VALID_ENV, MAIL_PROVIDER: 'sendgrid' })).toThrow(/MAIL_PROVIDER must be one of/);
+    expect(() => validateEnvironment({ ...VALID_ENV, SMTP_PORT: '0' })).toThrow(/SMTP_PORT/);
+    expect(validateEnvironment({ ...VALID_ENV, ...SMTP, SMTP_FROM: 'noreply@shagerdam.ir' }).SMTP_FROM).toBe('noreply@shagerdam.ir');
+  });
+
+  it('warns about the classic port / TLS mismatches', () => {
+    const warn = jest.fn();
+    validateEnvironment({ ...VALID_ENV, ...SMTP, SMTP_PORT: '465', SMTP_SECURE: 'false' }, { logger: { warn } });
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/SMTP_PORT=465/));
   });
 });

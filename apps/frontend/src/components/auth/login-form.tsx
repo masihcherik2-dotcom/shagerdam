@@ -1,9 +1,10 @@
 'use client';
 
-import { FlaskConical, KeyRound, Smartphone } from 'lucide-react';
+import { FlaskConical, KeyRound, Mail, Smartphone } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState, type FormEvent } from 'react';
 
+import { EmailOtpLogin } from '@/components/auth/email-otp-login';
 import { GoogleSignInButton } from '@/components/auth/google-sign-in-button';
 import { useSession } from '@/components/providers/session-provider';
 import { Button } from '@/components/ui/button';
@@ -18,12 +19,13 @@ import { formatMobile, toLatinDigits, toPersianDigits } from '@/lib/format';
 import { IRAN_MOBILE_PATTERN } from '@/lib/iran';
 import { PLATFORM_NAME } from '@/lib/brand';
 
-type Mode = 'otp' | 'password';
+type Mode = 'otp' | 'email' | 'password';
 
 /**
  * Sign-in: Google (customers and vendors; a new Google identity confirms a
  * mobile number on /login/google), mobile + one-time code (sign-up on first
- * login) or email/mobile + password (staff and vendors). Everything goes
+ * login), a code by e-mail (when MAIL_PROVIDER is configured; a new address
+ * confirms a mobile number once) or email/mobile + password (staff and vendors). Everything goes
  * through the BFF, which stores the tokens in httpOnly cookies and merges the
  * guest cart.
  */
@@ -45,6 +47,7 @@ export function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [testSms, setTestSms] = useState(false);
   const [googleEnabled, setGoogleEnabled] = useState(false);
+  const [emailStatus, setEmailStatus] = useState<{ enabled: boolean; isTestProvider: boolean }>({ enabled: false, isTestProvider: false });
 
   useEffect(() => {
     apiGet<{ provider: string; isTestProvider: boolean }>('/auth/sms-provider')
@@ -53,6 +56,9 @@ export function LoginForm() {
     apiGet<{ enabled: boolean }>('/auth/google/status')
       .then((status) => setGoogleEnabled(status.enabled))
       .catch(() => setGoogleEnabled(false));
+    apiGet<{ enabled: boolean; isTestProvider: boolean }>('/auth/email-otp/status')
+      .then((status) => setEmailStatus(status))
+      .catch(() => setEmailStatus({ enabled: false, isTestProvider: false }));
   }, []);
 
   useEffect(() => {
@@ -145,13 +151,16 @@ export function LoginForm() {
         </div>
       ) : null}
 
-      <div className="mb-6 grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1" role="tablist">
+      <div className={`mb-6 grid ${emailStatus.enabled ? 'grid-cols-3' : 'grid-cols-2'} gap-1 rounded-xl bg-slate-100 p-1`} role="tablist">
         {(
           [
             { id: 'otp', label: 'ورود با کد یکبارمصرف', icon: Smartphone },
+            { id: 'email', label: 'ورود با ایمیل', icon: Mail },
             { id: 'password', label: 'ورود با رمز عبور', icon: KeyRound },
-          ] as const
-        ).map((tab) => (
+          ] satisfies { id: Mode; label: string; icon: typeof Mail }[]
+        )
+          .filter((tab) => tab.id !== 'email' || emailStatus.enabled)
+          .map((tab) => (
           <button
             key={tab.id}
             type="button"
@@ -199,6 +208,8 @@ export function LoginForm() {
             </button>
           </form>
         )
+      ) : mode === 'email' ? (
+        <EmailOtpLogin onSignedIn={finish} />
       ) : (
         <form onSubmit={(event) => void passwordLogin(event)} className="flex flex-col gap-4" noValidate>
           <Field label="ایمیل یا شمارهٔ موبایل">
@@ -219,6 +230,12 @@ export function LoginForm() {
         <p className="mt-6 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
           <FlaskConical className="mt-0.5 size-4 shrink-0" />
           محیط توسعه: سرویس پیامک آزمایشی (Sandbox) فعال است و پیامک واقعی ارسال نمی‌شود؛ کد در لاگ سرور ثبت می‌شود.
+        </p>
+      ) : null}
+      {emailStatus.isTestProvider && mode === 'email' ? (
+        <p className="mt-6 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900" data-testid="email-sandbox-notice">
+          <FlaskConical className="mt-0.5 size-4 shrink-0" />
+          محیط توسعه: سرویس ایمیل آزمایشی (Sandbox) فعال است و ایمیل واقعی ارسال نمی‌شود؛ کد در لاگ سرور ثبت می‌شود.
         </p>
       ) : null}
     </div>

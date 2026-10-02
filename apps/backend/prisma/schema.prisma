@@ -78,6 +78,10 @@ model User {
   id           String    @id @default(uuid()) @db.Uuid
   mobile       String    @unique @db.VarChar(15)
   email        String?   @unique @db.VarChar(254)
+  /// When the owner proved control of `email` (an e-mailed sign-in code, or a
+  /// Google-verified address). Null = claimed in the profile but unproven: such
+  /// an address never signs anyone in by itself. Cleared whenever `email` changes.
+  emailVerifiedAt DateTime? @map("email_verified_at") @db.Timestamptz(3)
   nationalCode String?   @unique @map("national_code") @db.VarChar(10)
   fullName     String    @map("full_name") @db.VarChar(120)
   role         UserRole  @default(CUSTOMER)

@@ -67,7 +67,10 @@ export class CrawlStoreDto {
 }
 
 class BulkOptionsDto {
-  @ApiPropertyOptional({ default: false, description: 'Publish every created product at once (otherwise they are saved unpublished, as drafts).' })
+  @ApiPropertyOptional({
+    default: true,
+    description: 'Publish every created product at once (default). Send false to save them unpublished, as drafts. Created variants are always active.',
+  })
   @IsOptionalNonNullable()
   @IsBoolean()
   autoPublish?: boolean;

@@ -5,6 +5,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useState } from 'react';
 
+import { PublishDraftsButton } from '@/components/products/publish-drafts-button';
 import { useSession } from '@/components/providers/session-provider';
 import { useToast } from '@/components/providers/toast-provider';
 import { Button } from '@/components/ui/button';
@@ -20,7 +21,7 @@ import { can } from '@/lib/auth/access';
 import { useApi, useDebounced, useMutation } from '@/lib/hooks/use-api';
 import { formatCount, formatDateTime } from '@/lib/format';
 
-type Filter = 'all' | 'published' | 'blocked';
+type Filter = 'all' | 'published' | 'draft' | 'blocked';
 
 export default function AdminProductsPage() {
   const { user } = useSession();
@@ -34,8 +35,8 @@ export default function AdminProductsPage() {
   const state = useApi<Page<AdminProduct>>('/admin/products', {
     search: term || undefined,
     vendorSlug: vendorTerm || undefined,
-    isBlockedByAdmin: filter === 'blocked' ? true : undefined,
-    isPublished: filter === 'published' ? true : undefined,
+    isBlockedByAdmin: filter === 'blocked' ? true : filter === 'draft' ? false : undefined,
+    isPublished: filter === 'published' ? true : filter === 'draft' ? false : undefined,
     page,
     pageSize: 20,
   });
@@ -74,13 +75,27 @@ export default function AdminProductsPage() {
 
   return (
     <>
-      <PageHeader title="نظارت بر محصولات" description="مسدودسازی محصولات ناقض قوانین با ذکر علت" />
+      <PageHeader
+        title="نظارت بر محصولات"
+        description="مسدودسازی محصولات ناقض قوانین با ذکر علت"
+        action={
+          mayModerate ? (
+            <PublishDraftsButton
+              endpoint="/admin/products/publish-drafts"
+              vendorSlug={vendorTerm || undefined}
+              scopeLabel={vendorTerm ? `فروشگاه «${vendorTerm}»` : 'همهٔ فروشگاه‌ها'}
+              onPublished={state.reload}
+            />
+          ) : undefined
+        }
+      />
       <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex flex-wrap gap-2">
           {(
             [
               ['all', 'همه'],
               ['published', 'منتشرشده'],
+              ['draft', 'پیش‌نویس'],
               ['blocked', 'مسدود'],
             ] as const
           ).map(([value, label]) => (

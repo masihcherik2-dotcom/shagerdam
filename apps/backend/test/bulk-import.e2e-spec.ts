@@ -169,6 +169,7 @@ const PAGES: Record<string, PageSpec> = {
   '/product/no-unit/': { title: `سماور بدون واحد قیمت ${RUN}`, jsonLdPrice: '2400000', images: [] },
   '/product/flaky/': { title: `چای‌ساز ناپایدار ${RUN}`, jsonLdPrice: '31000000', currency: 'IRR', images: [] },
   '/product/admin-kettle/': { title: `کتری روگازی ادمین ${RUN}`, jsonLdPrice: '6500000', currency: 'IRR', images: ['/img/pan.jpg'] },
+  '/product/admin-draft-kettle/': { title: `کتری پیش‌نویس ادمین ${RUN}`, jsonLdPrice: '7200000', currency: 'IRR', images: [] },
 };
 const SLOW_PAGES = Array.from({ length: 8 }, (_, i) => `/product/slow-${i}/`);
 
@@ -660,8 +661,27 @@ describe('Whole-store import — crawl-store, bulk-extract, jobs (live stack)', 
       expect(started.status).toBe(202);
       const job = await waitForJob(started.body.jobId, adminToken, base);
       expect(job).toMatchObject({ status: 'COMPLETED', staff: true, vendorId: owner.vendorId });
+      // Default: imported products go live at once, with an active variant.
+      expect(job.options.autoPublish).toBe(true);
       const item = job.items[0]!;
-      expect(item).toMatchObject({ status: 'SUCCEEDED', price: 6_500_000, product: { isPublished: false } });
+      expect(item).toMatchObject({ status: 'SUCCEEDED', price: 6_500_000, product: { isPublished: true } });
+      const live = await prisma.product.findUniqueOrThrow({ where: { id: item.product!.id }, select: { isPublished: true, variants: { select: { isActive: true } } } });
+      expect(live).toEqual({ isPublished: true, variants: [{ isActive: true }] });
+      const storefront = await request<{ product: { id: string } }>(`/products/${encodeURIComponent(item.product!.slug)}`);
+      expect(storefront.status).toBe(200);
+      // …found by storefront search and in its category listing…
+      const search = await request<{ items: { id: string }[] }>(`/products?search=${encodeURIComponent(`کتری روگازی ادمین ${RUN}`)}`);
+      expect(search.body.items.map((entry) => entry.id)).toContain(item.product!.id);
+      const listing = await request<{ items: { id: string }[] }>(`/products?categoryId=${categoryIds.digital}`);
+      expect(listing.body.items.map((entry) => entry.id)).toContain(item.product!.id);
+      // …and purchasable: a guest can put it in the cart.
+      const variant = await prisma.productVariant.findFirstOrThrow({ where: { productId: item.product!.id }, select: { id: true, stockQuantity: true } });
+      expect(variant.stockQuantity).toBeGreaterThan(0);
+      const cart = await request<{ canCheckout: boolean; groups: { lines: { productVariantId: string; isPurchasable: boolean }[] }[] }>('/cart/items', { method: 'POST', body: { productVariantId: variant.id, quantity: 1 } });
+      expect(cart.status).toBe(200);
+      expect(cart.body.canCheckout).toBe(true);
+      const line = cart.body.groups.flatMap((group) => group.lines).find((entry) => entry.productVariantId === variant.id);
+      expect(line?.isPurchasable).toBe(true);
 
       const row = await prisma.product.findUniqueOrThrow({ where: { id: item.product!.id }, select: { vendorId: true, media: { select: { mediaAsset: { select: { ownerUserId: true } } } } } });
       expect(row.vendorId).toBe(owner.vendorId);
@@ -674,6 +694,23 @@ describe('Whole-store import — crawl-store, bulk-extract, jobs (live stack)', 
       const latest = await request<{ job: BulkJob }>(`${VENDOR_BASE}/bulk-jobs/latest`, { token: owner.token });
       expect(latest.body.job.id).toBe(started.body.jobId);
       await redis.client.del(bulkKeys.daily(owner.vendorId));
+    }, 60_000);
+
+    it('still saves drafts when autoPublish is false', async () => {
+      const base = `/admin/vendors/${owner.vendorId}/products/import`;
+      const started = await request<{ jobId: string }>(`${base}/bulk-extract`, {
+        method: 'POST',
+        token: adminToken,
+        body: { urls: [`${shop()}/product/admin-draft-kettle/`], defaultCategoryId: categoryIds.digital, autoPublish: false },
+      });
+      expect(started.status).toBe(202);
+      const job = await waitForJob(started.body.jobId, adminToken, base);
+      expect(job.options.autoPublish).toBe(false);
+      const item = job.items[0]!;
+      expect(item).toMatchObject({ status: 'SUCCEEDED', product: { isPublished: false } });
+      const draft = await prisma.product.findUniqueOrThrow({ where: { id: item.product!.id }, select: { variants: { select: { isActive: true } } } });
+      expect(draft.variants).toEqual([{ isActive: true }]); // ready to publish later
+      expect((await request(`/products/${encodeURIComponent(item.product!.slug)}`)).status).toBe(404);
     }, 60_000);
   });
 });
