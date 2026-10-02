@@ -121,96 +121,44 @@ interface CategorySeed {
   children: Omit<CategorySeed, 'children'>[];
 }
 
-/** Baseline taxonomy and the commission the platform charges per category. */
-const CATEGORY_TREE: readonly CategorySeed[] = [
+/**
+ * Baseline taxonomy and the commission the platform charges per category: the
+ * four root departments of the storefront (commission rates set by the
+ * architect). Categories of earlier taxonomies are deactivated by the
+ * `20261010090000_storefront_root_categories` migration.
+ */
+export const CATEGORY_TREE: readonly CategorySeed[] = [
   {
-    slug: 'digital',
+    slug: 'digital-goods',
     titleFa: 'کالای دیجیتال',
     titleEn: 'Digital Goods',
-    defaultCommissionRate: '8.00',
+    defaultCommissionRate: '5.00',
     sortOrder: 10,
-    children: [
-      { slug: 'mobile', titleFa: 'گوشی موبایل', titleEn: 'Mobile Phones', defaultCommissionRate: '5.00', sortOrder: 10 },
-      { slug: 'laptop', titleFa: 'لپ‌تاپ و کامپیوتر', titleEn: 'Laptops & Computers', defaultCommissionRate: '6.00', sortOrder: 20 },
-      { slug: 'digital-accessories', titleFa: 'لوازم جانبی دیجیتال', titleEn: 'Digital Accessories', defaultCommissionRate: '12.00', sortOrder: 30 },
-    ],
+    children: [],
   },
   {
-    slug: 'home-kitchen',
-    titleFa: 'خانه و آشپزخانه',
-    titleEn: 'Home & Kitchen',
-    defaultCommissionRate: '10.00',
+    slug: 'home-decor',
+    titleFa: 'دکوراسیون',
+    titleEn: 'Home Decor',
+    defaultCommissionRate: '9.00',
     sortOrder: 20,
-    children: [
-      { slug: 'home-appliances', titleFa: 'لوازم خانگی', titleEn: 'Home Appliances', defaultCommissionRate: '7.00', sortOrder: 10 },
-      { slug: 'kitchenware', titleFa: 'ظروف و لوازم آشپزخانه', titleEn: 'Kitchenware', defaultCommissionRate: '15.00', sortOrder: 20 },
-    ],
+    children: [],
   },
   {
-    slug: 'fashion',
-    titleFa: 'مد و پوشاک',
-    titleEn: 'Fashion',
-    defaultCommissionRate: '14.00',
+    slug: 'beauty-products',
+    titleFa: 'محصولات زیبایی',
+    titleEn: 'Beauty Products',
+    defaultCommissionRate: '11.00',
     sortOrder: 30,
-    children: [
-      { slug: 'mens-clothing', titleFa: 'پوشاک مردانه', titleEn: "Men's Clothing", defaultCommissionRate: '14.00', sortOrder: 10 },
-      { slug: 'womens-clothing', titleFa: 'پوشاک زنانه', titleEn: "Women's Clothing", defaultCommissionRate: '14.00', sortOrder: 20 },
-      { slug: 'bags-shoes', titleFa: 'کیف و کفش', titleEn: 'Bags & Shoes', defaultCommissionRate: '16.00', sortOrder: 30 },
-    ],
+    children: [],
   },
   {
-    slug: 'beauty-health',
-    titleFa: 'زیبایی و سلامت',
-    titleEn: 'Beauty & Health',
-    defaultCommissionRate: '13.00',
+    slug: 'barber-salon-equipment',
+    titleFa: 'محصولات و تجهیزات آرایشگاهی',
+    titleEn: 'Barber & Salon Equipment',
+    defaultCommissionRate: '9.00',
     sortOrder: 40,
-    children: [
-      { slug: 'skincare', titleFa: 'مراقبت از پوست', titleEn: 'Skincare', defaultCommissionRate: '13.00', sortOrder: 10 },
-      { slug: 'personal-care', titleFa: 'بهداشت شخصی', titleEn: 'Personal Care', defaultCommissionRate: '11.00', sortOrder: 20 },
-    ],
-  },
-  {
-    slug: 'supermarket',
-    titleFa: 'سوپرمارکت',
-    titleEn: 'Supermarket',
-    defaultCommissionRate: '9.00',
-    sortOrder: 50,
-    children: [
-      { slug: 'food-beverage', titleFa: 'خواروبار و نوشیدنی', titleEn: 'Food & Beverage', defaultCommissionRate: '9.00', sortOrder: 10 },
-      { slug: 'dairy', titleFa: 'لبنیات', titleEn: 'Dairy', defaultCommissionRate: '6.00', sortOrder: 20 },
-    ],
-  },
-  {
-    slug: 'books-stationery',
-    titleFa: 'کتاب و لوازم‌التحریر',
-    titleEn: 'Books & Stationery',
-    defaultCommissionRate: '10.00',
-    sortOrder: 60,
-    children: [
-      { slug: 'books', titleFa: 'کتاب', titleEn: 'Books', defaultCommissionRate: '10.00', sortOrder: 10 },
-    ],
-  },
-  {
-    slug: 'sport-travel',
-    titleFa: 'ورزش و سفر',
-    titleEn: 'Sport & Travel',
-    defaultCommissionRate: '12.00',
-    sortOrder: 70,
-    children: [
-      { slug: 'fitness-equipment', titleFa: 'لوازم ورزشی و تناسب اندام', titleEn: 'Fitness Equipment', defaultCommissionRate: '12.00', sortOrder: 10 },
-      { slug: 'camping-travel', titleFa: 'کوهنوردی، کمپینگ و سفر', titleEn: 'Camping & Travel', defaultCommissionRate: '12.00', sortOrder: 20 },
-    ],
-  },
-  {
-    slug: 'tools-auto',
-    titleFa: 'ابزار و خودرو',
-    titleEn: 'Tools & Automotive',
-    defaultCommissionRate: '9.00',
-    sortOrder: 80,
-    children: [
-      { slug: 'power-tools', titleFa: 'ابزار برقی و دستی', titleEn: 'Power & Hand Tools', defaultCommissionRate: '9.00', sortOrder: 10 },
-      { slug: 'car-accessories', titleFa: 'لوازم جانبی خودرو', titleEn: 'Car Accessories', defaultCommissionRate: '10.00', sortOrder: 20 },
-    ],
+    children: [],
   },
 ];
 
@@ -257,7 +205,7 @@ const VENDOR_PRODUCTS: readonly ProductSeed[] = [
     description: 'گوشی هوشمند با نمایشگر ۶.۷ اینچی، حافظهٔ ۲۵۶ گیگابایت و دوربین سه‌گانه.',
     brand: 'Shagerdam Sample',
     basePrice: '42500000.00',
-    categorySlug: 'mobile',
+    categorySlug: 'digital-goods',
     isPublished: true,
     media: [
       { url: 'https://cdn.shopino.local/products/sample-smartphone-x1/front.jpg', thumbnailUrl: 'https://cdn.shopino.local/products/sample-smartphone-x1/front-thumb.jpg', isPrimary: true, sortOrder: 10 },
@@ -274,7 +222,7 @@ const VENDOR_PRODUCTS: readonly ProductSeed[] = [
     description: 'لپ‌تاپ ۱۴ اینچی با پردازندهٔ نسل جدید، ۱۶ گیگابایت رم و حافظهٔ SSD یک ترابایتی.',
     brand: 'Shagerdam Sample',
     basePrice: '78900000.00',
-    categorySlug: 'laptop',
+    categorySlug: 'digital-goods',
     isPublished: true,
     media: [
       { url: 'https://cdn.shopino.local/products/sample-laptop-pro14/main.jpg', thumbnailUrl: 'https://cdn.shopino.local/products/sample-laptop-pro14/main-thumb.jpg', isPrimary: true, sortOrder: 10 },
@@ -285,20 +233,20 @@ const VENDOR_PRODUCTS: readonly ProductSeed[] = [
     ],
   },
   {
-    slug: 'shopino-sample-cotton-tshirt',
-    title: 'تی‌شرت نخی نمونه',
-    description: 'تی‌شرت پنبه‌ای با دوخت صنعتی، مناسب استفادهٔ روزمره.',
+    slug: 'shopino-sample-velvet-cushion',
+    title: 'کوسن دکوراتیو مخمل نمونه',
+    description: 'کوسن مخمل با پرکنندهٔ الیاف میکرو و روکش جداشونده با زیپ مخفی، مناسب مبل و تخت.',
     brand: 'Shagerdam Sample',
-    basePrice: '890000.00',
-    categorySlug: 'mens-clothing',
+    basePrice: '1450000.00',
+    categorySlug: 'home-decor',
     isPublished: true,
     media: [
-      { url: 'https://cdn.shopino.local/products/sample-cotton-tshirt/white.jpg', thumbnailUrl: 'https://cdn.shopino.local/products/sample-cotton-tshirt/white-thumb.jpg', isPrimary: true, sortOrder: 10 },
+      { url: 'https://cdn.shopino.local/products/sample-velvet-cushion/green.jpg', thumbnailUrl: 'https://cdn.shopino.local/products/sample-velvet-cushion/green-thumb.jpg', isPrimary: true, sortOrder: 10 },
     ],
     variants: [
-      { sku: 'SHP-TSHIRT-WHT-L', colorName: 'سفید', colorHex: '#FFFFFF', size: 'L', price: '890000.00', compareAtPrice: '1150000.00', stockQuantity: 40, weightGrams: 180 },
-      { sku: 'SHP-TSHIRT-WHT-XL', colorName: 'سفید', colorHex: '#FFFFFF', size: 'XL', price: '890000.00', compareAtPrice: '1150000.00', stockQuantity: 25, weightGrams: 195 },
-      { sku: 'SHP-TSHIRT-BLK-L', colorName: 'مشکی', colorHex: '#111827', size: 'L', price: '920000.00', stockQuantity: 18, weightGrams: 180 },
+      { sku: 'SHP-CUSHION-GRN-45', colorName: 'سبز یشمی', colorHex: '#047857', size: '45×45', price: '1450000.00', compareAtPrice: '1690000.00', stockQuantity: 30, weightGrams: 520 },
+      { sku: 'SHP-CUSHION-GRN-50', colorName: 'سبز یشمی', colorHex: '#047857', size: '50×50', price: '1690000.00', stockQuantity: 18, weightGrams: 640 },
+      { sku: 'SHP-CUSHION-BEG-45', colorName: 'کرم', colorHex: '#E7DCC8', size: '45×45', price: '1450000.00', stockQuantity: 22, weightGrams: 520 },
     ],
   },
 ];

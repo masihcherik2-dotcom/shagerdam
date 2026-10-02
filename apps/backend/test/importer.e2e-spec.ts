@@ -10,6 +10,7 @@ import { AppModule } from '../src/app.module';
 import { GLOBAL_API_PREFIX } from '../src/common/constants';
 import { PrismaService } from '../src/infra/prisma/prisma.service';
 import { RedisService } from '../src/infra/redis/redis.service';
+import { CategoriesService } from '../src/modules/categories/categories.service';
 import { normalizeIdentifier } from '../src/modules/auth/auth.service';
 import { OtpKeys } from '../src/modules/auth/otp.service';
 import { loginAttemptsKey, loginLockKey } from '../src/modules/auth/token.service';
@@ -26,6 +27,7 @@ import { SMS_PROVIDER, type SmsProvider } from '../src/modules/sms/sms-provider.
 import type { SandboxSmsProvider } from '../src/modules/sms/providers/sandbox-sms.provider';
 import { STORAGE_PROVIDER, type StorageProvider } from '../src/modules/storage/storage-provider.interface';
 import { applyGlobalPolicies } from '../src/setup/app.setup';
+import { createImporterCategories, removeImporterCategories, type ImporterCategoryIds } from './support/importer-categories';
 
 /**
  * End-to-end verification of the product importer against the real stack:
@@ -169,7 +171,7 @@ describe('Product importer — extract-spec, ingest-images, create (live stack)'
   let vendor: { token: string; userId: string; vendorId: string };
   let pending: { token: string; userId: string };
   let customer: { token: string; userId: string };
-  let categoryIds: { mobile: string; digital: string };
+  let categoryIds: ImporterCategoryIds;
 
   const API = `/${GLOBAL_API_PREFIX}`;
 
@@ -281,10 +283,7 @@ describe('Product importer — extract-spec, ingest-images, create (live stack)'
     expect(approved.status).toBe(200);
     vendor = { ...v, vendorId };
 
-    const categories = await prisma.category.findMany({ where: { slug: { in: ['mobile', 'digital'] } }, select: { id: true, slug: true } });
-    const bySlug = new Map(categories.map((row) => [row.slug, row.id]));
-    if (!bySlug.has('mobile') || !bySlug.has('digital')) throw new Error('The seeded categories "mobile" and "digital" are required (pnpm db:seed).');
-    categoryIds = { mobile: bySlug.get('mobile')!, digital: bySlug.get('digital')! };
+    categoryIds = await createImporterCategories(prisma, app.get(CategoriesService), RUN);
   }, 120_000);
 
   afterAll(async () => {
@@ -313,6 +312,7 @@ describe('Product importer — extract-spec, ingest-images, create (live stack)'
       await prisma.mediaAsset.deleteMany({ where: { ownerUserId: { in: userIds } } });
       await prisma.vendor.deleteMany({ where: { id: { in: vendorIds } } });
       await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+      await removeImporterCategories(prisma, app.get(CategoriesService));
       await resetKeys();
     }
     await app?.close();

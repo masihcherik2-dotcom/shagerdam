@@ -1,4 +1,4 @@
-import { ArrowLeft, CalendarClock, ShieldCheck, Sparkles, Store } from 'lucide-react';
+import { ArrowLeft, CalendarClock, CreditCard, Sparkles, Store } from 'lucide-react';
 import Image from 'next/image';
 
 import { LinkButton } from '@/components/ui/button';
@@ -29,7 +29,7 @@ export function HomeHero({ bnplEnabled, totals }: { bnplEnabled: boolean; totals
             هر چه می‌خواهید، از فروشگاه‌های تأییدشده؛ نقدی یا اقساطی
           </h1>
           <p className="text-sm leading-7 text-white/85 md:text-base">
-            پول شما تا زمان تحویل کالا نزد {PLATFORM_NAME} امانت می‌ماند. سفارش از چند فروشگاه را یک‌جا پرداخت کنید و هر مرسوله را جداگانه پیگیری کنید.
+            خرید اقساط بلندمدت و اعتباری: امکان خرید اقساطی با اعتبار بانکی و بدون ضامن. سفارش از چند فروشگاه را یک‌جا پرداخت کنید و هر مرسوله را جداگانه پیگیری کنید.
           </p>
           <div className="flex flex-col gap-3 sm:flex-row">
             <LinkButton
@@ -54,7 +54,7 @@ export function HomeHero({ bnplEnabled, totals }: { bnplEnabled: boolean; totals
           </div>
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-white/80">
             <span className="inline-flex items-center gap-1.5">
-              <ShieldCheck className="size-4" aria-hidden="true" /> پرداخت امانی تا تحویل
+              <CreditCard className="size-4" aria-hidden="true" /> خرید اقساط بلندمدت و اعتباری، بدون ضامن
             </span>
             {totals ? (
               <span>

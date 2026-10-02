@@ -10,6 +10,9 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { OtpService } from './otp.service';
 import { TokenService } from './token.service';
+import { GoogleAuthController } from './google/google-auth.controller';
+import { GoogleAuthService } from './google/google-auth.service';
+import { GOOGLE_OAUTH_ENDPOINTS, GOOGLE_PUBLIC_ENDPOINTS, GoogleOAuthClient } from './google/google-oauth.client';
 
 /**
  * Authentication module.
@@ -36,8 +39,15 @@ import { TokenService } from './token.service';
     SmsModule,
     AuditModule,
   ],
-  controllers: [AuthController],
-  providers: [AuthService, OtpService, TokenService],
+  controllers: [AuthController, GoogleAuthController],
+  providers: [
+    AuthService,
+    OtpService,
+    TokenService,
+    GoogleOAuthClient,
+    GoogleAuthService,
+    { provide: GOOGLE_OAUTH_ENDPOINTS, useValue: GOOGLE_PUBLIC_ENDPOINTS },
+  ],
   exports: [AuthService, TokenService],
 })
 export class AuthModule {}

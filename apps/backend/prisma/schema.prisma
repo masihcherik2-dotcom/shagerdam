@@ -86,6 +86,12 @@ model User {
   /// password is ever set; staff accounts always have one (enforced by the
   /// authentication phase).
   passwordHash String?   @map("password_hash") @db.VarChar(255)
+  /// OpenID Connect `sub` of the linked Google account (stable, never reused by
+  /// Google). Set only after the account's mobile was verified by OTP, or when a
+  /// verified Google e-mail matched this account.
+  googleSubject String?  @unique @map("google_subject") @db.VarChar(255)
+  /// Profile picture URL reported by Google at linking time (not downloaded).
+  avatarUrl    String?   @map("avatar_url") @db.VarChar(2048)
   lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz(3)
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)

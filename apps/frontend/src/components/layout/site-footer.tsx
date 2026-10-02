@@ -1,4 +1,4 @@
-import { BadgeCheck, Building2, Headphones, Hourglass, Mail, MapPin, Phone, RotateCcw, ShieldCheck } from 'lucide-react';
+import { BadgeCheck, Building2, CreditCard, Headphones, Hourglass, Mail, MapPin, Phone, RotateCcw } from 'lucide-react';
 import Link from 'next/link';
 
 import { loadBranding } from '@/lib/api/branding.server';
@@ -11,7 +11,7 @@ import { hasLegalIdentity, telHref } from '@/lib/site-info';
 import { BrandLogo } from './brand-logo';
 
 const TRUST_ITEMS = [
-  { icon: ShieldCheck, title: 'ضمانت اصالت و پرداخت امانی', text: 'پول شما تا تحویل کالا نزد ما امانت می‌ماند' },
+  { icon: CreditCard, title: 'خرید اقساط بلندمدت و اعتباری', text: 'امکان خرید اقساطی با اعتبار بانکی و بدون ضامن' },
   { icon: RotateCcw, title: '۷ روز مهلت بازگشت', text: 'بازگشت کالای معیوب یا مغایر' },
   { icon: BadgeCheck, title: 'فروشندگان احرازشده', text: 'هویت و حساب بانکی همهٔ فروشندگان بررسی می‌شود' },
   { icon: Headphones, title: 'پشتیبانی همیشگی', text: 'فرم پیام و سامانهٔ حل اختلاف در همهٔ ساعات' },
@@ -170,7 +170,7 @@ export async function SiteFooter() {
         <div className="flex flex-col gap-3">
           <BrandLogo variant="footer" logoUrl={branding.logoUrl} />
           <p className="text-xs font-medium text-slate-500">{PLATFORM_TAGLINE}</p>
-          <p className="leading-7">بازار آنلاین چندفروشندگی با پرداخت امن درگاه بانکی و خرید اقساطی. پول شما تا تحویل کالا نزد {PLATFORM_NAME} امانت می‌ماند.</p>
+          <p className="leading-7">بازار آنلاین چندفروشندگی با خرید اقساط بلندمدت و اعتباری: امکان خرید اقساطی با اعتبار بانکی و بدون ضامن، و پرداخت نقدی از درگاه بانکی.</p>
         </div>
         {LINK_GROUPS.map((group) => (
           <nav key={group.title} className="flex flex-col gap-2" aria-label={group.title}>

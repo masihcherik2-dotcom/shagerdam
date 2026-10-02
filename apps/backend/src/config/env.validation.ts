@@ -68,6 +68,9 @@ const OPTIONAL_KEYS: readonly string[] = [
   'S3_PUBLIC_BASE_URL',
   'ZARINPAL_MERCHANT_ID',
   'PAYMENT_RESULT_REDIRECT_URL',
+  'GOOGLE_CLIENT_ID',
+  'GOOGLE_CLIENT_SECRET',
+  'GOOGLE_REDIRECT_URI',
 ];
 
 /** Shape of the validated configuration object exposed through `ConfigService`. */
@@ -378,6 +381,31 @@ export class EnvironmentVariables {
   @Matches(/^https?:\/\/[^/\s]+$/, { message: 'PUBLIC_WEB_ORIGIN must be an absolute origin such as https://shagerdam.ir (no path, no trailing slash)' })
   PUBLIC_WEB_ORIGIN?: string;
 
+  // ─── Sign-in with Google (OAuth 2.0 / OpenID Connect) ─────────────────────
+  /**
+   * OAuth client of the Google Cloud project ("Web application" type). Both
+   * blank → Google sign-in is switched off and the storefront hides its button;
+   * one without the other is a configuration error.
+   */
+  @IsOptional()
+  @IsString()
+  @Matches(/^[0-9A-Za-z._-]+\.apps\.googleusercontent\.com$/, { message: 'GOOGLE_CLIENT_ID must be an OAuth client id such as 1234-abc.apps.googleusercontent.com' })
+  GOOGLE_CLIENT_ID?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(10)
+  GOOGLE_CLIENT_SECRET?: string;
+
+  /**
+   * Redirect URI registered for the client in Google Cloud Console. Optional:
+   * defaults to `<PUBLIC_WEB_ORIGIN or PUBLIC_API_ORIGIN>/api/session/google/callback`
+   * (the storefront's session endpoint, which completes the sign-in).
+   */
+  @IsOptional()
+  @Matches(/^https?:\/\/[^/\s]+\/\S*$/, { message: 'GOOGLE_REDIRECT_URI must be an absolute URL such as https://shagerdam.ir/api/session/google/callback' })
+  GOOGLE_REDIRECT_URI?: string;
+
   // ─── Integrations: Torob ───────────────────────────────────────────────────
   /** Redis TTL of a cached Torob feed page, in seconds; `0` disables the cache. Mutations invalidate earlier. */
   @Type(() => Number)
@@ -461,6 +489,7 @@ export function validateEnvironment(
   assertSmsConfiguration(config, logger);
   assertStorageConfiguration(config, logger);
   assertPaymentConfiguration(config, logger);
+  assertGoogleConfiguration(config);
   return config;
 }
 
@@ -615,6 +644,33 @@ function assertPaymentConfiguration(config: EnvironmentVariables, logger: Pick<L
     'PAYMENT_GATEWAY_PROVIDER=sandbox — card payments are simulated by the built-in sandbox bank page; no money moves. ' +
       'This is a development/test provider only.',
   );
+}
+
+/** Redirect URI Google sends the user back to (see {@link EnvironmentVariables.GOOGLE_REDIRECT_URI}). */
+export function resolveGoogleRedirectUri(config: Pick<EnvironmentVariables, 'GOOGLE_REDIRECT_URI' | 'PUBLIC_WEB_ORIGIN' | 'PUBLIC_API_ORIGIN'>): string {
+  return config.GOOGLE_REDIRECT_URI ?? `${config.PUBLIC_WEB_ORIGIN ?? config.PUBLIC_API_ORIGIN}/api/session/google/callback`;
+}
+
+/**
+ * Google sign-in is optional, but half a client is a mistake worth failing on;
+ * in production Google only accepts (and we only send) an https redirect URI.
+ */
+function assertGoogleConfiguration(config: EnvironmentVariables): void {
+  const hasId = config.GOOGLE_CLIENT_ID !== undefined;
+  const hasSecret = config.GOOGLE_CLIENT_SECRET !== undefined;
+  if (hasId !== hasSecret) {
+    throw new Error(
+      `Google sign-in needs both GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET (missing ${hasId ? 'GOOGLE_CLIENT_SECRET' : 'GOOGLE_CLIENT_ID'}). ` +
+        'Set both from the OAuth client in Google Cloud Console, or leave both blank to switch Google sign-in off.',
+    );
+  }
+  if (!hasId) {
+    return;
+  }
+  const redirectUri = resolveGoogleRedirectUri(config);
+  if (config.NODE_ENV === NodeEnvironment.Production && !redirectUri.startsWith('https://')) {
+    throw new Error(`Google sign-in in production needs an https redirect URI (got "${redirectUri}"). Set PUBLIC_WEB_ORIGIN or GOOGLE_REDIRECT_URI to the https address.`);
+  }
 }
 
 function formatValidationErrors(errors: readonly ValidationError[], parentPath = ''): string {

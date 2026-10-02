@@ -74,18 +74,19 @@ describe('Seed (e2e, real PostgreSQL)', () => {
   });
 
   describe('catalogue and categories', () => {
-    it('seeds the category tree with commission rates on every row', async () => {
-      const root = await prisma.category.findUniqueOrThrow({
-        where: { slug: 'digital' },
-        include: { children: true },
+    it('seeds exactly the four storefront root categories as the active tree, with their commission rates', async () => {
+      const active = await prisma.category.findMany({
+        where: { isActive: true },
+        select: { slug: true, titleFa: true, parentId: true, defaultCommissionRate: true },
+        orderBy: { sortOrder: 'asc' },
       });
 
-      expect(root.titleFa).toBe('کالای دیجیتال');
-      expect(root.children.length).toBeGreaterThan(0);
-      expect(root.children.every((child) => child.parentId === root.id)).toBe(true);
-
-      const withoutRate = await prisma.category.count({ where: { defaultCommissionRate: { lte: 0 } } });
-      expect(withoutRate).toBe(0);
+      expect(active.map((row) => [row.slug, row.titleFa, row.parentId, row.defaultCommissionRate.toFixed(2)])).toEqual([
+        ['digital-goods', 'کالای دیجیتال', null, '5.00'],
+        ['home-decor', 'دکوراسیون', null, '9.00'],
+        ['beauty-products', 'محصولات زیبایی', null, '11.00'],
+        ['barber-salon-equipment', 'محصولات و تجهیزات آرایشگاهی', null, '9.00'],
+      ]);
     });
 
     it('creates the sample vendor as an approved store owned by a VENDOR user with a wallet', async () => {

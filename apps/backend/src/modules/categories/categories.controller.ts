@@ -38,7 +38,7 @@ export class CategoriesController {
     summary: 'Category detail with breadcrumb and direct subcategories',
     description: 'The breadcrumb runs from the root down to the category itself.',
   })
-  @ApiParam({ name: 'slug', example: 'mobile' })
+  @ApiParam({ name: 'slug', example: 'digital-goods' })
   @ApiOkResponse({ type: CategoryDetailDto })
   @ApiNotFoundResponse({ description: 'Unknown category, or the category (or one of its ancestors) is inactive' })
   async detail(@Param('slug') slug: string): Promise<CategoryDetailDto> {

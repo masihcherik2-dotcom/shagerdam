@@ -1,36 +1,30 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { isValidSheba } from '../../src/common/validators/iranian-sheba';
+import { CATEGORY_TREE } from '../seed';
 import { DEMO_PRODUCTS, DEMO_STORES } from './demo-catalog.data';
 import { demoVariants, resolveDemoMobiles, resolveDemoVisibility } from './demo-catalog';
 
 const ASSETS = join(__dirname, 'assets');
-const REQUIRED_ROOTS: Record<string, string[]> = {
-  digital: ['mobile', 'laptop', 'digital-accessories'],
-  fashion: ['mens-clothing', 'womens-clothing', 'bags-shoes'],
-  'home-kitchen': ['home-appliances', 'kitchenware'],
-  'beauty-health': ['skincare', 'personal-care'],
-  'sport-travel': ['fitness-equipment', 'camping-travel'],
-  'tools-auto': ['power-tools', 'car-accessories'],
-};
+const ROOT_SLUGS = CATEGORY_TREE.map((root) => root.slug);
 
 describe('demo catalogue data', () => {
-  it('has 4 complete stores (logo file, SHEBA, Instagram, bio)', () => {
-    expect(DEMO_STORES).toHaveLength(4);
+  it('has 2 complete stores (logo file, SHEBA, Instagram, bio)', () => {
+    expect(DEMO_STORES).toHaveLength(2);
     for (const store of DEMO_STORES) {
       expect(isValidSheba(store.bankIban)).toBe(true);
       expect(store.instagramHandle.length).toBeGreaterThan(2);
       expect(store.bio.length).toBeGreaterThan(20);
       expect(existsSync(join(ASSETS, 'logos', store.logo))).toBe(true);
     }
-    expect(new Set(DEMO_STORES.map((store) => store.storeSlug)).size).toBe(4);
+    expect(new Set(DEMO_STORES.map((store) => store.storeSlug)).size).toBe(2);
   });
 
-  it('has 50+ products covering all 6 required categories', () => {
-    expect(DEMO_PRODUCTS.length).toBeGreaterThanOrEqual(50);
-    for (const [root, children] of Object.entries(REQUIRED_ROOTS)) {
-      const count = DEMO_PRODUCTS.filter((product) => children.includes(product.categorySlug)).length;
-      expect([root, count >= 5]).toEqual([root, true]);
+  it('places every product in one of the four storefront root categories', () => {
+    expect(DEMO_PRODUCTS).toHaveLength(18);
+    expect(DEMO_PRODUCTS.filter((product) => !ROOT_SLUGS.includes(product.categorySlug)).map((product) => product.slug)).toEqual([]);
+    for (const slug of ['digital-goods', 'beauty-products', 'barber-salon-equipment']) {
+      expect([slug, DEMO_PRODUCTS.some((product) => product.categorySlug === slug)]).toEqual([slug, true]);
     }
   });
 
@@ -55,10 +49,10 @@ describe('demo catalogue helpers', () => {
     expect(() => resolveDemoVisibility({ DEMO_VISIBILITY: 'public' })).toThrow(/hidden" or "live/);
   });
 
-  it('takes the owner mobiles from DEMO_VENDOR_MOBILES (exactly 4, normalised)', () => {
+  it('takes the owner mobiles from DEMO_VENDOR_MOBILES (exactly 2, normalised)', () => {
     expect(resolveDemoMobiles({})).toEqual(DEMO_STORES.map((store) => store.defaultMobile));
-    expect(resolveDemoMobiles({ DEMO_VENDOR_MOBILES: '09120000001, 09120000002,09120000003,+989120000004' })).toEqual(['+989120000001', '+989120000002', '+989120000003', '+989120000004']);
-    expect(() => resolveDemoMobiles({ DEMO_VENDOR_MOBILES: '09120000001' })).toThrow(/4 Iranian mobiles/);
+    expect(resolveDemoMobiles({ DEMO_VENDOR_MOBILES: '09120000001, +989120000002' })).toEqual(['+989120000001', '+989120000002']);
+    expect(() => resolveDemoMobiles({ DEMO_VENDOR_MOBILES: '09120000001' })).toThrow(/2 Iranian mobiles/);
   });
 
   it('builds the colour × size matrix in Rials with stock split per cell', () => {

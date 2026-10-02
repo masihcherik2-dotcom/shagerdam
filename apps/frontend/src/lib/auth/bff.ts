@@ -17,13 +17,19 @@ import {
  * only.
  */
 
+type CartMergeReport = { mergedLines: number; clampedLines: unknown[]; droppedLines: unknown[] };
+
 export interface BackendResult {
   status: number;
   body: unknown;
 }
 
-export async function callBackendJson(request: NextRequest, path: string, init: { method: string; body?: unknown; accessToken?: string; cartToken?: string }): Promise<BackendResult> {
-  const headers: Record<string, string> = { Accept: 'application/json', ...forwardingHeaders(request.headers) };
+export async function callBackendJson(
+  request: NextRequest,
+  path: string,
+  init: { method: string; body?: unknown; accessToken?: string; cartToken?: string; headers?: Record<string, string> },
+): Promise<BackendResult> {
+  const headers: Record<string, string> = { Accept: 'application/json', ...forwardingHeaders(request.headers), ...init.headers };
   if (init.body !== undefined) {
     headers['Content-Type'] = 'application/json';
   }
@@ -87,19 +93,18 @@ export function isSameOrigin(request: NextRequest): boolean {
 export const CROSS_SITE_BODY = { statusCode: 403, error: 'Forbidden', code: 'CROSS_SITE_REQUEST', message: 'درخواست از مبدأ دیگری ارسال شده است.' };
 
 /**
- * Completes a login: writes the session cookies, merges the guest cart into
- * the account (backend POST /cart/merge) and drops the guest cart cookie.
- * The browser receives only the user.
+ * Session cookies of a fresh login, after merging the guest cart into the
+ * account (backend POST /cart/merge) and dropping the guest cart cookie.
  */
-export async function completeLogin(request: NextRequest, tokens: AuthTokens): Promise<NextResponse> {
+export async function loginCookies(request: NextRequest, tokens: AuthTokens): Promise<{ cookies: CookieSpec[]; merge: CartMergeReport | null }> {
   const secure = shouldUseSecureCookies(request.headers, request.url);
   const cookies: CookieSpec[] = sessionCookies(tokens, secure);
   const guestCartToken = request.cookies.get(CART_COOKIE)?.value;
-  let merge: { mergedLines: number; clampedLines: unknown[]; droppedLines: unknown[] } | null = null;
+  let merge: CartMergeReport | null = null;
   if (guestCartToken) {
     const merged = await callBackendJson(request, 'cart/merge', { method: 'POST', accessToken: tokens.accessToken, cartToken: guestCartToken });
     if (merged.status < 300) {
-      merge = (merged.body as { report: typeof merge; cart: Cart }).report;
+      merge = (merged.body as { report: CartMergeReport; cart: Cart }).report;
     }
     // Merged (or refused as malformed): the guest cart cookie has done its job. On a
     // backend outage (5xx) it is kept so the next login can still merge it.
@@ -107,5 +112,15 @@ export async function completeLogin(request: NextRequest, tokens: AuthTokens): P
       cookies.push(clearedCartCookie(secure));
     }
   }
-  return applyCookies(jsonResponse(200, { user: tokens.user, cartMerge: merge }), cookies);
+  return { cookies, merge };
+}
+
+/**
+ * Completes a login: writes the session cookies, merges the guest cart into
+ * the account and drops the guest cart cookie. The browser receives only the
+ * user (plus `extra` fields such as the post-login path).
+ */
+export async function completeLogin(request: NextRequest, tokens: AuthTokens, extra: { body?: Record<string, unknown>; cookies?: CookieSpec[] } = {}): Promise<NextResponse> {
+  const { cookies, merge } = await loginCookies(request, tokens);
+  return applyCookies(jsonResponse(200, { user: tokens.user, cartMerge: merge, ...extra.body }), [...cookies, ...(extra.cookies ?? [])]);
 }

@@ -1,17 +1,20 @@
-import { Cpu, Tag, Tent } from 'lucide-react';
+import { Lamp, MonitorSmartphone, Scissors, Sparkles, Tag } from 'lucide-react';
 import { describe, expect, it } from 'vitest';
 
 import { CATEGORY_ICONS, categoryIcon } from './category-icon';
 
 describe('categoryIcon', () => {
-  it('maps every seeded category slug', () => {
-    const seeded = ['digital', 'mobile', 'laptop', 'digital-accessories', 'home-kitchen', 'home-appliances', 'kitchenware', 'fashion', 'mens-clothing', 'womens-clothing', 'bags-shoes', 'beauty-health', 'skincare', 'personal-care', 'supermarket', 'food-beverage', 'dairy', 'books-stationery', 'books', 'sport-travel', 'fitness-equipment', 'camping-travel', 'tools-auto', 'power-tools', 'car-accessories'];
-    expect(seeded.filter((slug) => !CATEGORY_ICONS[slug])).toEqual([]);
+  it('maps exactly the four seeded root categories to their own icons', () => {
+    expect(Object.keys(CATEGORY_ICONS).sort()).toEqual(['barber-salon-equipment', 'beauty-products', 'digital-goods', 'home-decor']);
+    expect(categoryIcon('digital-goods')).toBe(MonitorSmartphone);
+    expect(categoryIcon('home-decor')).toBe(Lamp);
+    expect(categoryIcon('beauty-products')).toBe(Sparkles);
+    expect(categoryIcon('barber-salon-equipment')).toBe(Scissors);
   });
 
   it('falls back to the parent icon, then to a neutral tag', () => {
-    expect(categoryIcon('camping-travel')).toBe(Tent);
-    expect(categoryIcon('new-child', 'digital')).toBe(Cpu);
+    expect(categoryIcon('hair-clippers', 'barber-salon-equipment')).toBe(Scissors);
     expect(categoryIcon('unknown')).toBe(Tag);
+    expect(categoryIcon('unknown', 'also-unknown')).toBe(Tag);
   });
 });

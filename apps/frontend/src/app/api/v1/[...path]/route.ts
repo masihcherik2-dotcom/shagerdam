@@ -55,6 +55,14 @@ const FORWARDED_REQUEST_HEADERS = ['accept', 'content-type', 'if-none-match', 'i
 /** Response headers the browser must not receive from upstream as-is. */
 const DROPPED_RESPONSE_HEADERS = new Set(['content-encoding', 'content-length', 'transfer-encoding', 'connection', 'keep-alive', 'set-cookie']);
 
+/**
+ * Google sign-in endpoints issue tokens or hold the signup ticket; only the
+ * BFF (/api/session/google/*) calls them. `auth/google/status` stays public.
+ */
+function isGoogleSessionPath(blockKey: string): boolean {
+  return blockKey === 'auth/google' || (blockKey.startsWith('auth/google/') && blockKey !== 'auth/google/status');
+}
+
 type RouteContext = { params: Promise<{ path: string[] }> };
 
 async function forward(request: NextRequest, path: string, body: ArrayBuffer | undefined, accessToken: string | undefined): Promise<Response> {
@@ -88,7 +96,7 @@ async function handle(request: NextRequest, context: RouteContext): Promise<Resp
   // Compared case-insensitively and without trailing slashes so `HEALTH` or
   // `health/` cannot slip past to a router that treats them as the same route.
   const blockKey = path.toLowerCase().replace(/\/+$/, '');
-  if (BLOCKED_PATHS.has(blockKey)) {
+  if (BLOCKED_PATHS.has(blockKey) || isGoogleSessionPath(blockKey)) {
     return jsonResponse(404, { statusCode: 404, error: 'Not Found', message: BLOCKED_MESSAGES[blockKey] ?? 'Use /api/session for sign-in, refresh and sign-out.' });
   }
   const mutating = request.method !== 'GET' && request.method !== 'HEAD';

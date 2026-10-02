@@ -111,7 +111,26 @@ export class AuthService {
    * the identity table.
    */
   async verifyOtp(dto: VerifyOtpDto, context: RequestContext): Promise<AuthTokensResponseDto> {
-    const result = await this.otp.verify(dto.mobile, dto.code);
+    await this.assertOtpMatches(dto.mobile, dto.code, context);
+
+    const identity = await this.users.ensureCustomer(dto.mobile);
+    this.assertActive(identity.user.isActive);
+
+    await this.otp.clear(dto.mobile);
+    const tokens = await this.tokens.issue(identity.user, context);
+    await this.users.touchLastLogin(identity.user.id);
+
+    this.logger.log(`OTP login succeeded for user ${identity.user.id} (role ${identity.user.role})`);
+    return this.toAuthResponse(tokens, identity.user);
+  }
+
+  /**
+   * Checks a code against the stored challenge (atomic, attempt-limited) and
+   * throws the matching 401/429 when it does not match. Shared by the OTP login
+   * and the mobile binding step of Google sign-in. Does not clear the challenge.
+   */
+  async assertOtpMatches(mobile: string, code: string, context: RequestContext): Promise<void> {
+    const result = await this.otp.verify(mobile, code);
 
     switch (result) {
       case OtpVerifyResult.NotFound:
@@ -123,7 +142,7 @@ export class AuthService {
         throw new UnauthorizedException('Incorrect code.');
 
       case OtpVerifyResult.Exhausted: {
-        const retryAfter = await this.otp.lockRemainingSeconds(dto.mobile);
+        const retryAfter = await this.otp.lockRemainingSeconds(mobile);
         await this.recordFailedLogin(null, 'otp_attempts_exhausted', context);
         throw new TooManyRequestsException(
           'Too many incorrect codes. This number is temporarily locked.',
@@ -132,18 +151,36 @@ export class AuthService {
       }
 
       case OtpVerifyResult.Match:
-        break;
+        return;
     }
+  }
 
-    const identity = await this.users.ensureCustomer(dto.mobile);
-    this.assertActive(identity.user.isActive);
+  /**
+   * Opens a session for an account authenticated by an external identity
+   * provider (Google): refuses deactivated accounts, issues the token pair,
+   * records the login and writes the LOGIN audit row (the Google callback is a
+   * GET, which the audit interceptor does not cover).
+   */
+  async completeExternalLogin(user: PublicUser, method: 'google', context: RequestContext, detail: Record<string, unknown> = {}): Promise<AuthTokensResponseDto> {
+    this.assertActive(user.isActive);
+    const tokens = await this.tokens.issue(user, context);
+    await this.users.touchLastLogin(user.id);
+    await this.audit.record({
+      userId: user.id,
+      action: AuditAction.LOGIN,
+      entityName: 'User',
+      entityId: user.id,
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent,
+      newValue: { success: true, method, ...detail },
+    });
+    this.logger.log(`${method} login succeeded for user ${user.id} (role ${user.role})`);
+    return this.toAuthResponse(tokens, user);
+  }
 
-    await this.otp.clear(dto.mobile);
-    const tokens = await this.tokens.issue(identity.user, context);
-    await this.users.touchLastLogin(identity.user.id);
-
-    this.logger.log(`OTP login succeeded for user ${identity.user.id} (role ${identity.user.role})`);
-    return this.toAuthResponse(tokens, identity.user);
+  /** Audit row of a refused external sign-in (no session was opened). */
+  async recordRefusedExternalLogin(userId: string | null, reason: string, context: RequestContext): Promise<void> {
+    await this.recordFailedLogin(userId, reason, context);
   }
 
   // ─── Password flow (staff, vendors) ───────────────────────────────────────

@@ -6,7 +6,7 @@
  *
  * The order is produced by the real business flows inside a Nest application
  * context, exactly as a shopper and three sellers would produce it:
- *   customer address → cart (3 items from 3 demo stores) → checkout (one
+ *   customer address → cart (3 items from 3 stores) → checkout (one
  *   parent order, one sub-order per store, stock reserved) → payment through
  *   the SANDBOX bank (initiate → settle PAY → verified callback; stock
  *   committed, escrow ledger entries written) → sellers move their sub-orders:
@@ -35,7 +35,11 @@ import { SandboxPaymentGatewayProvider } from '../../src/modules/payments/gatewa
 import { PaymentsService } from '../../src/modules/payments/payments.service';
 
 export const SAMPLE_CUSTOMER_MOBILE = '+989120000030';
-const SAMPLE_PRODUCTS = ['demo-powerbank-20000', 'demo-nonstick-frypan-28', 'demo-jump-rope'] as const;
+/**
+ * One item per store: the two demo stores plus the sample vendor of the
+ * development base seed (`SEED_PROFILE=demo` outside production loads both).
+ */
+const SAMPLE_PRODUCTS = ['demo-powerbank-20000', 'demo-sunscreen-spf50', 'shopino-sample-velvet-cushion'] as const;
 const CONTEXT = { ipAddress: null, userAgent: 'demo-sample-order' };
 
 export interface SampleOrderResult {

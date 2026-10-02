@@ -1,5 +1,5 @@
 import type { ConfigService } from '@nestjs/config';
-import { validateEnvironment, NodeEnvironment } from './env.validation';
+import { validateEnvironment, NodeEnvironment, resolveGoogleRedirectUri } from './env.validation';
 import { resolveLogLevels } from './logger.config';
 import { buildCorsOptions, parseOriginList } from './cors.config';
 
@@ -339,5 +339,31 @@ describe('buildCorsOptions', () => {
       'https://a.example',
       'https://b.example',
     ]);
+  });
+});
+
+describe('Google sign-in configuration', () => {
+  const CLIENT = { GOOGLE_CLIENT_ID: '1234-abc.apps.googleusercontent.com', GOOGLE_CLIENT_SECRET: 'GOCSPX-test-secret-value' };
+
+  it('is off when both keys are blank, and the redirect URI defaults to the storefront session endpoint', () => {
+    const config = validateEnvironment({ ...VALID_ENV, GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: ' ' });
+    expect(config.GOOGLE_CLIENT_ID).toBeUndefined();
+    expect(resolveGoogleRedirectUri(config)).toBe('http://localhost:4000/api/session/google/callback');
+    expect(resolveGoogleRedirectUri(validateEnvironment({ ...VALID_ENV, PUBLIC_WEB_ORIGIN: 'https://shagerdam.ir' }))).toBe('https://shagerdam.ir/api/session/google/callback');
+  });
+
+  it('accepts a complete client and an explicit redirect URI', () => {
+    const config = validateEnvironment({ ...VALID_ENV, ...CLIENT, GOOGLE_REDIRECT_URI: 'https://shop.example/api/session/google/callback' });
+    expect(config.GOOGLE_CLIENT_ID).toBe(CLIENT.GOOGLE_CLIENT_ID);
+    expect(resolveGoogleRedirectUri(config)).toBe('https://shop.example/api/session/google/callback');
+  });
+
+  it('refuses half a client, a malformed client id and plain-http redirects in production', () => {
+    expect(() => validateEnvironment({ ...VALID_ENV, GOOGLE_CLIENT_ID: CLIENT.GOOGLE_CLIENT_ID })).toThrow(/missing GOOGLE_CLIENT_SECRET/);
+    expect(() => validateEnvironment({ ...VALID_ENV, GOOGLE_CLIENT_SECRET: CLIENT.GOOGLE_CLIENT_SECRET })).toThrow(/missing GOOGLE_CLIENT_ID/);
+    expect(() => validateEnvironment({ ...VALID_ENV, ...CLIENT, GOOGLE_CLIENT_ID: 'not-a-client' })).toThrow(/GOOGLE_CLIENT_ID must be/);
+    const production = { ...VALID_ENV, NODE_ENV: 'production', SMS_PROVIDER: 'kavenegar', SMS_KAVENEGAR_API_KEY: 'k', SMS_KAVENEGAR_SENDER: 's', SMS_KAVENEGAR_OTP_TEMPLATE: 't', PAYMENT_GATEWAY_PROVIDER: 'zarinpal', ZARINPAL_MERCHANT_ID: MERCHANT_ID, ...CLIENT };
+    expect(() => validateEnvironment(production)).toThrow(/https redirect URI/);
+    expect(() => validateEnvironment({ ...production, PUBLIC_WEB_ORIGIN: 'https://shagerdam.ir' })).not.toThrow();
   });
 });

@@ -1,5 +1,5 @@
 /**
- * Demo catalogue loader — 4 stores and 54 products with images, specifications,
+ * Demo catalogue loader — 2 stores and 18 products with images, specifications,
  * variants and stock (content: `demo-catalog.data.ts`).
  *
  * Run (after the base seed):
@@ -25,8 +25,8 @@
  *
  * Idempotent: stores are addressed by slug and products by slug; existing rows
  * are left untouched (an operator's edits are never overwritten).
- * Owner mobiles: DEMO_VENDOR_MOBILES (4 comma-separated numbers) or the
- * development defaults +98912000002{1..4}.
+ * Owner mobiles: DEMO_VENDOR_MOBILES (2 comma-separated numbers) or the
+ * development defaults +98912000002{1,2}.
  */
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';

@@ -1,4 +1,4 @@
-import { ArrowLeft, BadgeCheck, BadgePercent, CalendarClock, Flame, LayoutGrid, ShieldCheck, Sparkles, Store, Truck } from 'lucide-react';
+import { ArrowLeft, BadgeCheck, BadgePercent, CalendarClock, CreditCard, Flame, LayoutGrid, Sparkles, Store, Truck } from 'lucide-react';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 
@@ -71,7 +71,7 @@ export default async function HomePage() {
       {/* Trust strip */}
       <section className="grid gap-3 sm:grid-cols-3">
         {[
-          { icon: ShieldCheck, title: 'پرداخت امن و امانی', text: 'مبلغ تا تأیید تحویل به فروشنده پرداخت نمی‌شود.' },
+          { icon: CreditCard, title: 'خرید اقساط بلندمدت و اعتباری', text: 'امکان خرید اقساطی با اعتبار بانکی و بدون ضامن' },
           { icon: BadgeCheck, title: 'فروشندگان احرازشده', text: 'مدارک هویتی و حساب بانکی هر فروشگاه بررسی می‌شود.' },
           { icon: Truck, title: 'پیگیری هر مرسوله', text: 'کد رهگیری و وضعیت هر بسته جداگانه نمایش داده می‌شود.' },
         ].map((item) => (

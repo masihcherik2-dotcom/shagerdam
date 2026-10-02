@@ -6,13 +6,13 @@ export class CategorySummaryDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
 
-  @ApiProperty({ example: 'mobile' })
+  @ApiProperty({ example: 'digital-goods' })
   slug!: string;
 
-  @ApiProperty({ example: 'گوشی موبایل' })
+  @ApiProperty({ example: 'کالای دیجیتال' })
   titleFa!: string;
 
-  @ApiProperty({ example: 'Mobile Phones', nullable: true, type: String })
+  @ApiProperty({ example: 'Digital Goods', nullable: true, type: String })
   titleEn!: string | null;
 
   static from(node: Pick<CategoryNode, 'id' | 'slug' | 'titleFa' | 'titleEn'>): CategorySummaryDto {

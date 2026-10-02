@@ -70,13 +70,35 @@ export interface CookieSpec {
     httpOnly: true;
     sameSite: 'lax';
     secure: boolean;
-    path: '/';
+    path: string;
     maxAge: number;
   };
 }
 
-function spec(name: string, value: string, maxAge: number, secure: boolean): CookieSpec {
-  return { name, value, options: { httpOnly: true, sameSite: 'lax', secure, path: '/', maxAge } };
+function spec(name: string, value: string, maxAge: number, secure: boolean, path = '/'): CookieSpec {
+  return { name, value, options: { httpOnly: true, sameSite: 'lax', secure, path, maxAge } };
+}
+
+/**
+ * Sign-in with Google keeps two short-lived values in httpOnly cookies scoped
+ * to the BFF's Google routes: the one-time OAuth `state` (bound to this
+ * browser — a callback with someone else's state is refused) and the ticket of
+ * the mobile-binding step. Lax: the callback is a top-level GET from Google.
+ */
+export const GOOGLE_STATE_COOKIE = 'shopino_google_state';
+export const GOOGLE_SIGNUP_COOKIE = 'shopino_google_signup';
+const GOOGLE_COOKIE_PATH = '/api/session/google';
+
+export function googleStateCookie(state: string, maxAge: number, secure: boolean): CookieSpec {
+  return spec(GOOGLE_STATE_COOKIE, state, maxAge, secure, GOOGLE_COOKIE_PATH);
+}
+
+export function googleSignupCookie(ticket: string, maxAge: number, secure: boolean): CookieSpec {
+  return spec(GOOGLE_SIGNUP_COOKIE, ticket, maxAge, secure, GOOGLE_COOKIE_PATH);
+}
+
+export function clearedGoogleCookies(secure: boolean): CookieSpec[] {
+  return [spec(GOOGLE_STATE_COOKIE, '', 0, secure, GOOGLE_COOKIE_PATH), spec(GOOGLE_SIGNUP_COOKIE, '', 0, secure, GOOGLE_COOKIE_PATH)];
 }
 
 /** Cookies to write after a login or a refresh. */

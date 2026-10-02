@@ -58,7 +58,7 @@ export class PublicProductQueryDto extends PaginationQueryDto {
   @MaxLength(100)
   search?: string;
 
-  @ApiPropertyOptional({ example: 'digital', description: 'Includes products of this category and all its descendants.' })
+  @ApiPropertyOptional({ example: 'digital-goods', description: 'Includes products of this category and all its descendants.' })
   @IsOptional()
   @IsString()
   @MaxLength(80)

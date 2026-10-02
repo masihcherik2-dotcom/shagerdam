@@ -198,6 +198,7 @@ In development every external integration uses a sandbox implementation behind t
 | Card payment | `sandbox` (built-in simulated bank page) | `zarinpal` (IPG v4) | Implemented (`ZarinpalPaymentGatewayProvider`) |
 | File storage | `local` (volume) | `s3` (ArvanCloud / Liara / any S3-compatible store) | Implemented (`S3StorageProvider`) |
 | BNPL credit | `SANDBOX_BANK` | a bank's live credit API | **Not implemented**; see §4.4 |
+| Sign in with Google | off (blank `GOOGLE_*`) | Google OAuth client | Implemented (OIDC + PKCE); optional, see §4.5 |
 
 ### 4.1 SMS: Kavenegar [needs account]
 
@@ -329,6 +330,48 @@ SQL
 ```
 
 Switching it off again is the reverse (`credit.enabled='false'`). Existing installment schedules keep running.
+
+### 4.5 Sign in with Google [needs a Google account]
+
+Optional. With `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` blank, the login page simply shows no Google button.
+
+**How it works:**
+- The login page's «ورود / ثبت‌نام سریع با گوگل» button sends the user to Google (authorization code flow with PKCE, a one-time `state` and a `nonce`).
+- Google returns to `https://<domain>/api/session/google/callback`, and the API verifies the result.
+- A user already linked to that Google account, or matching it by a Google-verified e-mail, is signed in straight away.
+- Anyone else confirms a mobile number by SMS code on `/login/google`. An existing account with that mobile is linked; otherwise a new customer account is created.
+- Staff accounts (admin, finance, support) cannot use Google sign-in.
+
+**Steps:**
+1. In <https://console.cloud.google.com>, create a project (or pick one).
+2. Under **APIs & Services → OAuth consent screen**:
+   - choose *External*;
+   - fill in the app name, support e-mail and the domain;
+   - add the scopes `openid`, `email` and `profile`;
+   - **publish** the app. While it is in *Testing*, only listed test users can sign in.
+3. Under **APIs & Services → Credentials → Create credentials → OAuth client ID**:
+   - application type *Web application*;
+   - **Authorised redirect URI** `https://<domain>/api/session/google/callback`. This must be exact: https, no trailing slash, and the same domain users browse.
+4. Put the client id and secret into `/opt/shopino/.env.production`:
+
+```bash
+GOOGLE_CLIENT_ID=1234567890-abc.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=GOCSPX-...
+GOOGLE_REDIRECT_URI=https://<domain>/api/session/google/callback   # optional; this is the default when PUBLIC_WEB_ORIGIN is set
+```
+
+5. Restart the API:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file /opt/shopino/.env.production up -d backend
+```
+
+6. Check that Google sign-in is switched on: `curl -s https://<domain>/api/v1/auth/google/status` returns `{"enabled":true}`.
+
+**Notes:**
+- The API refuses to boot if only one of the id and secret is set, or if the redirect URI is not https in production.
+- The server must be able to reach `oauth2.googleapis.com`. The user's browser must be able to reach `accounts.google.com`, which is filtered for many users inside Iran.
+- Google sign-in therefore supplements the SMS login and never replaces it.
 
 ---
 

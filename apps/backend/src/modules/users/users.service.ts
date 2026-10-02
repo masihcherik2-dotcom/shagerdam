@@ -51,6 +51,20 @@ export interface UserIdentity {
   vendor: VendorProfileSummary | null;
 }
 
+/** A user together with the Google subject linked to it (if any). */
+export interface GoogleLinkedUser {
+  user: PublicUser;
+  googleSubject: string | null;
+}
+
+/** What a Google sign-in contributes to an account. */
+export interface GoogleLinkInput {
+  subject: string;
+  email: string | null;
+  emailVerified: boolean;
+  picture: string | null;
+}
+
 export interface ProfileUpdateResult {
   before: { fullName: string; email: string | null; nationalCode: string | null; birthDate: Date | null };
   after: { fullName: string; email: string | null; nationalCode: string | null; birthDate: Date | null };
@@ -153,6 +167,110 @@ export class UsersService {
       }
       throw error;
     }
+  }
+
+  // ─── Google identity (sign-in with Google) ────────────────────────────────
+
+  /** The account a Google subject is linked to, with the link itself. */
+  async findByGoogleSubject(subject: string): Promise<GoogleLinkedUser | null> {
+    const user = await this.prisma.user.findUnique({ where: { googleSubject: subject }, select: { ...PUBLIC_USER_SELECT, googleSubject: true } });
+    return user === null ? null : { user: this.toPublicUser(user), googleSubject: user.googleSubject };
+  }
+
+  /** The account holding an e-mail address (stored lower-case), with its Google link. */
+  async findByEmailForGoogle(email: string): Promise<GoogleLinkedUser | null> {
+    const user = await this.prisma.user.findFirst({ where: { email: email.trim().toLowerCase() }, select: { ...PUBLIC_USER_SELECT, googleSubject: true } });
+    return user === null ? null : { user: this.toPublicUser(user), googleSubject: user.googleSubject };
+  }
+
+  /** The account owning a mobile number, with its Google link. */
+  async findByMobileForGoogle(mobile: string): Promise<GoogleLinkedUser | null> {
+    const normalized = toE164(mobile) ?? mobile;
+    const user = await this.prisma.user.findUnique({ where: { mobile: normalized }, select: { ...PUBLIC_USER_SELECT, googleSubject: true } });
+    return user === null ? null : { user: this.toPublicUser(user), googleSubject: user.googleSubject };
+  }
+
+  /**
+   * Links a Google account to an existing user. The picture is refreshed; the
+   * Google e-mail is adopted only when it is verified, the account has none and
+   * no other account uses it. Throws `ConflictException` when the subject is
+   * linked to another account (lost race) or this account is linked to another
+   * subject.
+   */
+  async linkGoogleAccount(userId: string, link: GoogleLinkInput): Promise<PublicUser> {
+    const current = await this.prisma.user.findUnique({ where: { id: userId }, select: { email: true, googleSubject: true } });
+    if (current === null) {
+      throw new NotFoundException('User not found');
+    }
+    if (current.googleSubject !== null && current.googleSubject !== link.subject) {
+      throw new ConflictException({ statusCode: 409, error: 'Conflict', code: 'GOOGLE_ACCOUNT_CONFLICT', message: 'This account is already linked to another Google account' });
+    }
+    const adoptEmail = current.email === null && link.email !== null && link.emailVerified && (await this.prisma.user.count({ where: { email: link.email } })) === 0;
+    try {
+      const updated = await this.prisma.user.update({
+        where: { id: userId },
+        data: {
+          googleSubject: link.subject,
+          ...(link.picture !== null ? { avatarUrl: link.picture } : {}),
+          ...(adoptEmail ? { email: link.email } : {}),
+        },
+        select: PUBLIC_USER_SELECT,
+      });
+      this.logger.log(`Google account linked to user ${userId}${adoptEmail ? ' (verified e-mail adopted)' : ''}`);
+      return updated;
+    } catch (error) {
+      throw this.googleConflict(error);
+    }
+  }
+
+  /**
+   * Creates the customer account of a Google user whose mobile number was just
+   * verified by OTP: Google name (or the default name), verified free e-mail,
+   * Google subject and picture, and the empty customer profile — one insert.
+   */
+  async createGoogleCustomer(mobile: string, link: GoogleLinkInput & { name: string | null }): Promise<PublicUser> {
+    const normalized = toE164(mobile) ?? mobile;
+    const useEmail = link.email !== null && link.emailVerified && (await this.prisma.user.count({ where: { email: link.email } })) === 0;
+    try {
+      const created = await this.prisma.user.create({
+        data: {
+          mobile: normalized,
+          fullName: link.name ?? `کاربر ${toNationalFormat(normalized)}`,
+          email: useEmail ? link.email : null,
+          googleSubject: link.subject,
+          avatarUrl: link.picture,
+          role: UserRole.CUSTOMER,
+          customerProfile: { create: {} },
+        },
+        select: PUBLIC_USER_SELECT,
+      });
+      this.logger.log(`Customer account created through Google sign-in: ${created.id}`);
+      return created;
+    } catch (error) {
+      throw this.googleConflict(error);
+    }
+  }
+
+  /** Unique-constraint races (subject, mobile or e-mail taken meanwhile) become a 409 the client can explain. */
+  private googleConflict(error: unknown): unknown {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      return new ConflictException({ statusCode: 409, error: 'Conflict', code: 'GOOGLE_ACCOUNT_CONFLICT', message: 'The Google account, mobile or e-mail was linked to another account meanwhile' });
+    }
+    return error;
+  }
+
+  private toPublicUser(user: PublicUser & { googleSubject?: string | null }): PublicUser {
+    return {
+      id: user.id,
+      mobile: user.mobile,
+      email: user.email,
+      fullName: user.fullName,
+      role: user.role,
+      isActive: user.isActive,
+      nationalCode: user.nationalCode,
+      lastLoginAt: user.lastLoginAt,
+      createdAt: user.createdAt,
+    };
   }
 
   /** Records a successful authentication. Best-effort: never blocks the login. */

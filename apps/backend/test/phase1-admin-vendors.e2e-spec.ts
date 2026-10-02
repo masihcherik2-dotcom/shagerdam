@@ -122,8 +122,8 @@ describe('Phase 1 — admin-created stores, admin catalogue, on-sale filter, GSC
     adminToken = await loginWithPassword(SEEDED_ADMIN_EMAIL, adminPassword);
     supportToken = await loginWithPassword(SEEDED_SUPPORT_EMAIL, staffPassword);
 
-    const category = await prisma.category.findFirst({ where: { slug: 'power-tools', isActive: true }, select: { id: true } });
-    if (category === null) throw new Error('Seeded category "power-tools" is missing — run the seed.');
+    const category = await prisma.category.findFirst({ where: { slug: 'home-decor', isActive: true }, select: { id: true } });
+    if (category === null) throw new Error('Seeded category "home-decor" is missing — run the seed.');
     categoryId = category.id;
 
     const current = await request<{ googleVerificationTag: string | null }>('/admin/site-info', { token: adminToken });

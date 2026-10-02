@@ -238,12 +238,12 @@ describe('Torob integration — marketplace and per-store feeds, product details
     storeB = await onboard(VENDOR_B_MOBILE, `trb-b-${RUN}`, IBANS[1]!, true);
     pendingSlug = (await onboard(PENDING_MOBILE, `trb-p-${RUN}`, IBANS[2]!, false)).storeSlug;
 
-    const mobile = await prisma.category.findUniqueOrThrow({ where: { slug: 'mobile' }, select: { id: true } });
+    const digitalGoods = await prisma.category.findUniqueOrThrow({ where: { slug: 'digital-goods' }, select: { id: true } });
     const images = [await uploadImage(storeA.token, '#1d4ed8'), await uploadImage(storeA.token, '#dc2626')];
 
     products.a = await createProduct(storeA, {
       title: `گوشی موبایل آزمون ترب ${RUN}`,
-      categoryId: mobile.id,
+      categoryId: digitalGoods.id,
       brand: 'سامسونگ',
       basePrice: 620_000_000,
       mediaIds: images,
@@ -259,21 +259,21 @@ describe('Torob integration — marketplace and per-store feeds, product details
     });
     products.draft = await createProduct(storeA, {
       title: `پیش‌نویس آزمون ترب ${RUN}`,
-      categoryId: mobile.id,
+      categoryId: digitalGoods.id,
       basePrice: 1_000_000,
       variants: [{ sku: SKU.draft, price: 1_000_000, stockQuantity: 3 }],
       isPublished: false,
     });
     products.blocked = await createProduct(storeA, {
       title: `کالای مسدودشدنی آزمون ترب ${RUN}`,
-      categoryId: mobile.id,
+      categoryId: digitalGoods.id,
       basePrice: 2_000_000,
       variants: [{ sku: SKU.blocked, price: 2_000_000, stockQuantity: 3 }],
       isPublished: true,
     });
     products.b = await createProduct(storeB, {
       title: `کالای فروشگاه دوم آزمون ترب ${RUN}`,
-      categoryId: mobile.id,
+      categoryId: digitalGoods.id,
       basePrice: 3_000_000,
       variants: [{ sku: SKU.b1, size: 'XL', price: 3_000_000, stockQuantity: 2 }],
       isPublished: true,
@@ -354,7 +354,7 @@ describe('Torob integration — marketplace and per-store feeds, product details
         old_price: 650_000_000,
         availability: 'instock',
         page_url: `${webOrigin}/products/${encodeURIComponent(products.a.slug)}?variant=${SKU.a1}`,
-        category_name: 'کالای دیجیتال > گوشی موبایل',
+        category_name: 'کالای دیجیتال',
         spec: { 'حافظه داخلی': '256 گیگابایت', 'مقدار RAM': '12 گیگابایت', برند: 'سامسونگ', رنگ: 'مشکی تیتانیوم', گارانتی: 'گارانتی ۱۸ ماهه شرکتی' },
         guarantee: 'گارانتی ۱۸ ماهه شرکتی',
         delivery_fee: expectedDeliveryFee,

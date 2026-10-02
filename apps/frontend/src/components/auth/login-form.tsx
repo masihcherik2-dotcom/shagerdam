@@ -4,13 +4,16 @@ import { FlaskConical, KeyRound, Smartphone } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState, type FormEvent } from 'react';
 
+import { GoogleSignInButton } from '@/components/auth/google-sign-in-button';
 import { useSession } from '@/components/providers/session-provider';
 import { Button } from '@/components/ui/button';
 import { Field, FormError, Input } from '@/components/ui/field';
 import { apiGet, sessionClient } from '@/lib/api/client';
+import { messageForCode } from '@/lib/api/error-messages';
 import { toApiError } from '@/lib/api/errors';
 import type { AuthUser, OtpRequestResponse } from '@/lib/api/types';
 import { homeForRole, safeNextPath } from '@/lib/auth/access';
+import { toGoogleLoginError } from '@/lib/auth/google-session';
 import { formatMobile, toLatinDigits, toPersianDigits } from '@/lib/format';
 import { IRAN_MOBILE_PATTERN } from '@/lib/iran';
 import { PLATFORM_NAME } from '@/lib/brand';
@@ -18,15 +21,18 @@ import { PLATFORM_NAME } from '@/lib/brand';
 type Mode = 'otp' | 'password';
 
 /**
- * Sign-in: mobile + one-time code (customers, sign-up on first login) or
- * email/mobile + password (staff and vendors). Both post to the BFF, which
- * stores the tokens in httpOnly cookies and merges the guest cart.
+ * Sign-in: Google (customers and vendors; a new Google identity confirms a
+ * mobile number on /login/google), mobile + one-time code (sign-up on first
+ * login) or email/mobile + password (staff and vendors). Everything goes
+ * through the BFF, which stores the tokens in httpOnly cookies and merges the
+ * guest cart.
  */
 export function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const { refresh } = useSession();
   const next = safeNextPath(params.get('next'));
+  const googleFailure = params.get('google');
 
   const [mode, setMode] = useState<Mode>('otp');
   const [mobile, setMobile] = useState('');
@@ -38,11 +44,15 @@ export function LoginForm() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [testSms, setTestSms] = useState(false);
+  const [googleEnabled, setGoogleEnabled] = useState(false);
 
   useEffect(() => {
     apiGet<{ provider: string; isTestProvider: boolean }>('/auth/sms-provider')
       .then((info) => setTestSms(info.isTestProvider))
       .catch(() => setTestSms(false));
+    apiGet<{ enabled: boolean }>('/auth/google/status')
+      .then((status) => setGoogleEnabled(status.enabled))
+      .catch(() => setGoogleEnabled(false));
   }, []);
 
   useEffect(() => {
@@ -117,6 +127,23 @@ export function LoginForm() {
     <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
       <h1 className="mb-1 text-xl font-black text-slate-900">ورود به {PLATFORM_NAME}</h1>
       <p className="mb-6 text-sm text-slate-500">{next ? 'برای ادامه وارد حساب خود شوید.' : 'خرید، پیگیری سفارش و مدیریت فروشگاه'}</p>
+
+      {googleFailure ? (
+        <div className="mb-4" data-testid="google-error">
+          <FormError message={messageForCode(toGoogleLoginError(googleFailure)) ?? null} />
+        </div>
+      ) : null}
+
+      {googleEnabled ? (
+        <div className="mb-6">
+          <GoogleSignInButton next={next} />
+          <div className="mt-6 flex items-center gap-3 text-xs text-slate-400" aria-hidden="true">
+            <span className="h-px flex-1 bg-slate-200" />
+            یا
+            <span className="h-px flex-1 bg-slate-200" />
+          </div>
+        </div>
+      ) : null}
 
       <div className="mb-6 grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1" role="tablist">
         {(
